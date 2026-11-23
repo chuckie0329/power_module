@@ -1,0 +1,39 @@
+{
+  "retrieved_utc": "2026-11-06T13:07:07+00:00",
+  "source_url": "https://www.xinlucity.com/?s=resourcedetail/index/id/608.html",
+  "attachments": [],
+  "attachment_status": "资料下载栏目显示暂无内容",
+  "files": [
+    {
+      "path": "images/产品主图.png",
+      "source_url": "https://testxinlu.oss-cn-beijing.aliyuncs.com/static/upload/images/warehouse/2026/08/11/1786418751409509.png",
+      "bytes": 159797,
+      "sha256": "258ad8c9ee9148381b1d5196ab9ba9b67b14eae58a239a30b978ca7050b3723f"
+    },
+    {
+      "path": "images/A款焊盘配置图.png",
+      "source_url": "https://testxinlu.oss-cn-beijing.aliyuncs.com/static/upload/images/warehouse/2026/08/11/1786418186514136.png",
+      "bytes": 174637,
+      "sha256": "efd77a30ef252da813fd92fa01c65bd6b77ff09392b9bd6633c54ea4210d00d5"
+    },
+    {
+      "path": "images/B款焊盘配置图.png",
+      "source_url": "https://testxinlu.oss-cn-beijing.aliyuncs.com/static/upload/images/warehouse/2026/08/11/1786418570815241.png",
+      "bytes": 178845,
+      "sha256": "d73dd4d32c96fe8fa2a2294838a85dfcc5fd557fabd72b8d59f93c8115995bef"
+    },
+    {
+      "path": "网页原始快照.html",
+      "source_url": "https://www.xinlucity.com/?s=resourcedetail/index/id/608.html",
+      "bytes": 185585,
+      "sha256": "a1e0c87c0ff866142dfa460202366ebbc8f8913c6ef4a822c6e58ae957643987"
+    },
+    {
+      "path": "网页资料离线版.html",
+      "source_url": "https://www.xinlucity.com/?s=resourcedetail/index/id/608.html",
+      "derived": true,
+      "bytes": 4781,
+      "sha256": "2015a3bdf27d7e799b92b5933a70269b12838283466c577b7d2b1196d5e4abe9"
+    }
+  ]
+}

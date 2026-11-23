@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# Preserve exact bytes referenced by the PD archive manifest.
+modules/PD诱骗模块/*.html -text

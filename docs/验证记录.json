@@ -1,0 +1,13 @@
+{
+  "modbus_frames": [
+    "01 03 00 02 00 02 65 cb",
+    "01 06 00 00 04 b0 8a be",
+    "01 06 00 12 00 01 e8 0f",
+    "01 06 00 12 00 00 29 cf"
+  ],
+  "power_points": 10,
+  "archived_files_verified": 5,
+  "offline_product_images": 2,
+  "local_document_links": 72,
+  "status": "passed"
+}

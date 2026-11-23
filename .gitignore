@@ -1,0 +1,23 @@
+# Local build and development files
+/.work/
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+/firmware/build/
+/pc_client/build/
+
+# Local settings and generated files
+/.vscode/
+.env
+.env.*
+!.env.example
+Thumbs.db
+Desktop.ini
+电源曲线_*.csv
+
+# Vendor utilities and compiled examples kept locally
+/modules/**/工具软件/
+/modules/**/*.rar
+/modules/**/测试程序/**/*.bin
+/modules/**/测试程序/**/*.hex

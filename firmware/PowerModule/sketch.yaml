@@ -1,0 +1,9 @@
+profiles:
+  power_module:
+    fqbn: esp32:esp32:esp32:FlashMode=dio,FlashFreq=40,FlashSize=4M,PartitionScheme=default
+    platforms:
+      - platform: esp32:esp32 (3.3.12)
+        platform_index_url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    libraries:
+      - ArduinoJson (7.4.2)
+      - NimBLE-Arduino (2.3.8)

@@ -1,0 +1,3 @@
+PySide6-Essentials==6.10.1
+bleak==2.1.1
+pyserial==3.5
