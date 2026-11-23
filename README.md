@@ -4,6 +4,8 @@
 
 ![Type-C 可调直流电源整机外观渲染图](docs/images/power-module-render.png)
 
+[3D 打印模型与打印配置（MakerWorld）](https://makerworld.com.cn/zh/models/3324172-sx150c-type-c-ke-diao-zhi-liu-dian-yuan-wai-ke)
+
 ## 下载和使用
 
 1. 下载 Windows 便携客户端和配套固件。`.bin` 用于客户端升级，`.hex` 用于 ESP32 下载口烧录。 [发布下载](https://github.com/chuckie0329/power_module/releases/latest)
