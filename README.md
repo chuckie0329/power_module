@@ -23,3 +23,7 @@
 ## 验证资料
 
 在项目根目录运行 `python tools/verify_design.py`，可校验设计书中的 Modbus 示例、PD 归档校验和及资料的本地链接。 [设计验证记录](docs/验证记录.json)
+
+## 许可证
+
+本项目自有的 ESP32 固件与 Windows 客户端源代码采用 MIT 许可证。第三方依赖与厂商资料适用各自的条款。 [MIT 许可证](LICENSE)
