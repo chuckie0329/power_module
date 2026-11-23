@@ -2,6 +2,8 @@
 
 这是一套由 USB Type-C PD 供电的可调直流电源。PD 20 V 同时供电给 SX150C 和 ESP32 双路继电器板。ESP32 经 HW-221 电平转换与 SX150C 通信，Windows 客户端可通过 CH340E 有线串口或 BLE 控制主输出及两路继电器。整机输入预算为 100 W，初始输出设定按 75 W 目标验证。
 
+![Type-C 可调直流电源整机外观渲染图](docs/images/power-module-render.png)
+
 ## 下载和使用
 
 1. 下载 Windows 便携客户端和配套固件。`.bin` 用于客户端升级，`.hex` 用于 ESP32 下载口烧录。 [发布下载](https://github.com/chuckie0329/power_module/releases/latest)
