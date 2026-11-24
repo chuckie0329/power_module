@@ -45,6 +45,7 @@ class FloatingPanel(QWidget):
         meters = QHBoxLayout()
         meters.setSpacing(2)
         self.values = {}
+        samples = {}
         for key, unit, sample, name in (
             ("voltage", "V", " 40.00 V ", "输出电压"),
             ("current", "A", " 8.000 A ", "输出电流"),
@@ -55,8 +56,7 @@ class FloatingPanel(QWidget):
             meter.setToolTip(f"{name}；拖动可移动窗口，双击可恢复主窗口")
             meter.setAlignment(Qt.AlignmentFlag.AlignCenter)
             meter.setCursor(Qt.CursorShape.SizeAllCursor)
-            meter.ensurePolished()
-            meter.setMinimumWidth(meter.fontMetrics().horizontalAdvance(sample) + 5)
+            samples[key] = sample
             meters.addWidget(meter, 1)
             self.values[key] = (meter, unit)
         body.addLayout(meters)
@@ -78,7 +78,18 @@ class FloatingPanel(QWidget):
         self._menu.addAction("恢复主窗口", self.restore_requested.emit)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(lambda point: self._menu.popup(self.mapToGlobal(point)))
-        self.adjustSize()
+        # Size to content, not the platform style's full-width push-button hints.
+        self.ensurePolished()
+        for key, (meter, _) in self.values.items():
+            meter.ensurePolished()
+            meter.setFixedWidth(meter.fontMetrics().horizontalAdvance(samples[key]) + 5)
+        for widget, captions in (
+            (self.output, ("输出 开", "输出 关", "输出 —")),
+            *((widget, (f"K{channel} 开", f"K{channel} 关", f"K{channel} —"))
+              for channel, widget in self.relays.items()),
+        ):
+            widget.ensurePolished()
+            widget.setFixedWidth(max(widget.fontMetrics().horizontalAdvance(caption) for caption in captions) + 14)
         self.setFixedSize(self.sizeHint())
 
     @staticmethod

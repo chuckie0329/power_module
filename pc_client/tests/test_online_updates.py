@@ -66,7 +66,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_released_firmware_catalog(self):
         folder = Path(__file__).resolve().parents[2]
-        firmware = u.parse_catalog(json.loads((folder / "updates/firmware-stable.json").read_text()), "firmware")
+        firmware = u.parse_catalog(json.loads((folder / "updates/firmware-stable.json").read_text(encoding="utf-8")), "firmware")
         self.assertEqual((firmware.version, firmware.size, firmware.kind), ("1.2.1", 660176, "firmware"))
 
 
