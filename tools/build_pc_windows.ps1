@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..'))
-$buildPython = (Get-Command python -CommandType Application).Source
+$buildPython = & python -c "import sys; print(sys.executable)"
+if ($LASTEXITCODE -ne 0 -or -not $buildPython) { throw 'Could not locate the selected Python.' }
 & $buildPython -c "import sys,struct; assert sys.platform == 'win32' and sys.version_info[:2] == (3,12) and struct.calcsize('P') == 8"
 if ($LASTEXITCODE -ne 0) { throw 'Windows x64 Python 3.12 is required.' }
 New-Item -ItemType Directory -Force '.work' | Out-Null
