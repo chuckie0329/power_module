@@ -47,6 +47,7 @@ private:
 
 const char* decode(const Message& line, JsonDocument& doc, Message& canonical);
 Message encode(JsonDocument& doc);
+Message encodeInfoReply(JsonDocument& doc);
 
 class Outbox {
 public:

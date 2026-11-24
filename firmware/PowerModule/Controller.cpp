@@ -794,7 +794,10 @@ Message Controller::response(uint32_t id, const char* code, const JsonDocument* 
     if (id) doc["id"] = id;
     doc["ok"] = code == nullptr;
     if (code) doc["fault"]["code"] = code;
-    if (data) doc["data"].set(data->as<JsonVariantConst>());
+    if (data) {
+        doc["data"].set(data->as<JsonVariantConst>());
+        return encodeInfoReply(doc);  // get_info is the only reply with this data.
+    }
     return encode(doc);
 }
 

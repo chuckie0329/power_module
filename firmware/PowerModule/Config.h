@@ -40,7 +40,7 @@ constexpr uint32_t kBlePasskey = 112233;
 constexpr uint32_t kBleSecurityTimeoutMs = 60000;
 constexpr uint32_t kFragmentMs = 5000;
 constexpr size_t kMaxLine = 1024;  // Includes LF.
-constexpr char kFirmware[] = "1.2.1";
+constexpr char kFirmware[] = "1.2.2";
 constexpr uint8_t kProtocol = 1;
 
 constexpr char kService[]   = "4d505301-7e64-4d4a-9f80-021a56c11000";

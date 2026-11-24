@@ -1,0 +1,134 @@
+{
+  "on": {
+    "v": 1,
+    "state_rev": 102,
+    "uptime_ms": 3839481,
+    "mode": "running",
+    "applied": {
+      "enabled": true,
+      "relay1": false,
+      "relay2": false,
+      "voltage_mV": 12000,
+      "current_mA": 1000,
+      "group": 0
+    },
+    "measured": {
+      "fresh": true,
+      "sampled_ms": 3839370,
+      "voltage_mV": 12000,
+      "current_mA": 1000,
+      "power_mW": 12000,
+      "input_mV": 19980,
+      "cvcc": "CV"
+    },
+    "protection": {
+      "ovp_mV": 42000,
+      "lvp_mV": 18000,
+      "opp_mW": 75000,
+      "power_on_raw": 0,
+      "ocp_mA": 8200,
+      "ocp_step_mA": 1
+    },
+    "fault": {
+      "code": null,
+      "sx_protect_raw": 0
+    },
+    "type": "reply",
+    "id": 268435456,
+    "ok": true,
+    "data": {
+      "v": 1,
+      "firmware": "1.2.1",
+      "device_id": "PM-0123456789AB",
+      "esp_module": "ESP32-WROOM-32E",
+      "sx_address": 1,
+      "sx_baud": 115200,
+      "usb_baud": 921600,
+      "relays": 2,
+      "max_output_mW": 75000,
+      "min_voltage_mV": 500,
+      "max_voltage_mV": 40000,
+      "max_current_mA": 8000,
+      "step": 10,
+      "input_current_supported": false,
+      "input_power_supported": false,
+      "protection_write": true,
+      "opp_write": true,
+      "output_off": true,
+      "direct_control": true,
+      "group_select": true,
+      "stream_period": true,
+      "sx_model_raw": 4008,
+      "sx_version_raw": 100,
+      "stream_period_ms": 500,
+      "min_stream_period_ms": 33
+    },
+    "crc32": "12123434"
+  },
+  "off": {
+    "v": 1,
+    "state_rev": 102,
+    "uptime_ms": 3839481,
+    "mode": "off",
+    "applied": {
+      "enabled": false,
+      "relay1": false,
+      "relay2": false,
+      "voltage_mV": 12000,
+      "current_mA": 1000,
+      "group": 0
+    },
+    "measured": {
+      "fresh": true,
+      "sampled_ms": 3839370,
+      "voltage_mV": 0,
+      "current_mA": 0,
+      "power_mW": 0,
+      "input_mV": 19980,
+      "cvcc": "CV"
+    },
+    "protection": {
+      "ovp_mV": 42000,
+      "lvp_mV": 18000,
+      "opp_mW": 75000,
+      "power_on_raw": 0,
+      "ocp_mA": 8200,
+      "ocp_step_mA": 1
+    },
+    "fault": {
+      "code": null,
+      "sx_protect_raw": 0
+    },
+    "type": "reply",
+    "id": 268435456,
+    "ok": true,
+    "data": {
+      "v": 1,
+      "firmware": "1.2.1",
+      "device_id": "PM-0123456789AB",
+      "esp_module": "ESP32-WROOM-32E",
+      "sx_address": 1,
+      "sx_baud": 115200,
+      "usb_baud": 921600,
+      "relays": 2,
+      "max_output_mW": 75000,
+      "min_voltage_mV": 500,
+      "max_voltage_mV": 40000,
+      "max_current_mA": 8000,
+      "step": 10,
+      "input_current_supported": false,
+      "input_power_supported": false,
+      "protection_write": true,
+      "opp_write": true,
+      "output_off": true,
+      "direct_control": true,
+      "group_select": true,
+      "stream_period": true,
+      "sx_model_raw": 4008,
+      "sx_version_raw": 100,
+      "stream_period_ms": 500,
+      "min_stream_period_ms": 33
+    },
+    "crc32": "12123434"
+  }
+}

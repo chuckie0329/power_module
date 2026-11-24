@@ -196,6 +196,17 @@ Message encode(JsonDocument& doc) {
     return line;
 }
 
+Message encodeInfoReply(JsonDocument& doc) {
+    Message line = encode(doc);
+    if (!line.empty()) return line;
+
+    // Preserve identification and all capabilities, not a partial state snapshot.
+    // Running outputs can make the combined info/state reply exceed kMaxLine.
+    JsonDocument infoOnly;
+    for (const char* key : {"v", "type", "id", "ok", "data"}) infoOnly[key].set(doc[key]);
+    return encode(infoOnly);
+}
+
 bool Outbox::push(Message message) {
     if (message.empty() || size_ == lines_.size()) return false;
     lines_[(first_ + size_) % lines_.size()] = std::move(message);
