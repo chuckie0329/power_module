@@ -52,8 +52,8 @@ Copy-Item .work/esp32-build/PowerModule.ino.bin firmware/build/PowerModule-ESP32
 
 设备首次使用升级功能需要通过下载口安装 v1.2.0 或更新固件。之后连接 CH340E 有线串口或 BLE，在 PC 客户端的「固件升级」中选择应用镜像。 [客户端升级 BIN][firmware-bin] · [下载口烧录 HEX][firmware-hex]
 
-[firmware-bin]: https://github.com/chuckie0329/power_module/releases/latest/download/PowerModule-ESP32.bin
-[firmware-hex]: https://github.com/chuckie0329/power_module/releases/latest/download/PowerModule-ESP32.hex
+[firmware-bin]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.bin
+[firmware-hex]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.hex
 
 升级要求主输出和两路继电器已读回关闭。固件检查应用镜像类型，将数据顺序写入空闲应用分区，并检查完整 SHA-256 和 ESP32 应用镜像。传输中断或取消可从头重试。设备在 45 秒没有收到固件数据后清理未完成的传输。校验通过后切换启动分区，客户端会重新连接并确认新版本。新版本启动后约两分钟未获得确认时，设备会尝试回到上一个有效版本。升级只写应用分区和启动记录，地址、波特率及蓝牙配对等设置保存在 NVS。[ESP-IDF 应用升级与回退](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/ota.html)
 

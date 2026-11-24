@@ -1,6 +1,6 @@
 # Windows 直流电源客户端
 
-下载并双击 EXE 启动。USB 串口号由 Windows 分配，下文用 COM4 代表后板 CH340E 数据口，用 COM3 代表 ESP32 烧录和维护口。 [Windows 便携版](https://github.com/chuckie0329/power_module/releases/latest/download/PowerModule-PC.exe)
+下载并双击 EXE 启动。USB 串口号由 Windows 分配，下文用 COM4 代表后板 CH340E 数据口，用 COM3 代表 ESP32 烧录和维护口。 [Windows 便携版](https://github.com/chuckie0329/power_module/releases)
 
 ## 连接和控制
 
@@ -20,14 +20,21 @@
 
 切换模式不会断开连接、改变采样配置或发送输出命令。悬浮模式不会使用主窗口中尚未应用的电压和限流设定来开启输出：请先回主窗口处理设定。固件 v1.2.1 起，断开连接不等于关断输出。
 
+## 在线检查更新
+
+点击主窗口的「检查更新」再点击「检查」。Windows 客户端与 ESP32 固件各有独立版本和稳定通道；
+检查、下载均由用户发起。下载先核对版本链接、文件长度和 SHA-256，固件还核对镜像及内嵌版本。
+客户端 EXE 不会自动运行。固件只保存为 BIN，是否安装仍由主窗口「固件升级」和设备现有的关断保护决定。
+离线时可继续使用原有功能；不会启动任何自动联网或升级行为。
+
 ## 固件升级
 
 从 ESP32 固件 v1.2.0 起，可在客户端通过 COM4 或蓝牙升级。连接设备并关闭主输出和两路继电器，点击 **固件升级** 并选择应用镜像。客户端会显示传输进度，在校验完成并重启后自动重连，确认新镜像已启动。传输过程中可以点击 **取消升级**。 [应用镜像 BIN][firmware-bin]
 
 首次启用这项功能时，先通过 COM3 安装 v1.2.0 或更新固件。 [COM3 烧录镜像][firmware-hex] · [固件烧录和升级说明](../firmware/README.md)
 
-[firmware-bin]: https://github.com/chuckie0329/power_module/releases/latest/download/PowerModule-ESP32.bin
-[firmware-hex]: https://github.com/chuckie0329/power_module/releases/latest/download/PowerModule-ESP32.hex
+[firmware-bin]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.bin
+[firmware-hex]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.hex
 
 2026-11-21 在实机上用同一份 660944 字节的 v1.2.0 镜像验证升级。COM4 从 app0 切换到 app1，含重启和确认用时 60.9 秒。BLE 从 app1 切换到 app0，用时 141.7 秒。中途取消、校验失败和 BLE 断开均保留了原启动分区。另一次启动到 app1 后省略客户端确认，设备约两分钟后自动回到 app0，主输出读回关闭。
 
@@ -78,12 +85,5 @@ python -m pc_client
 
 ```powershell
 python -m pip install pyinstaller==6.16.0
-$buildPython = (Get-Command python -CommandType Application).Source
-$originalPath = $env:Path
-try {
-    $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
-    & $buildPython -m PyInstaller --noconfirm --onefile --windowed --name PowerModule-PC --icon pc_client/assets/power_module.ico --paths . --workpath .work/pc-client-pyi-clean --specpath .work --distpath pc_client/build --hidden-import bleak.backends.winrt.client --hidden-import bleak.backends.winrt.scanner pc_client/__main__.py
-} finally {
-    $env:Path = $originalPath
-}
+.\tools\build_pc_windows.ps1
 ```

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "kind": "firmware",
+  "stable": {
+    "version": "1.2.1",
+    "target": "PowerModule-ESP32",
+    "protocol": 1,
+    "url": "https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.bin",
+    "sha256": "87969bfa936e66648b80a6191eddb5cf7bf52c8d7b957d78c0b652a48492f9a1",
+    "size": 660176,
+    "notes": "现有正式固件，不含单独测试的重连修复。"
+  }
+}

@@ -17,6 +17,8 @@ from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
 from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
 from pc_client.theme import STYLES, icon
+from pc_client.update_dialog import UpdateDialog
+from pc_client.version import PC_VERSION
 
 
 GROUP_NOTE_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -121,7 +123,7 @@ def card(title=None):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("直流电源控制台")
+        self.setWindowTitle(f"直流电源控制台 v{PC_VERSION}")
         self.setMinimumSize(990, 690)
         self.resize(1200, 810)
         self.worker = LinkWorker()
@@ -149,6 +151,7 @@ class Window(QMainWindow):
         self.floating = None
         self.tray = None
         self.hidden_chart_dialog = None
+        self.update_dialog = None
 
         page = QWidget()
         page.setObjectName("page")
@@ -233,6 +236,7 @@ class Window(QMainWindow):
         row.addWidget(self.connect_button)
         self.update_button = button("固件升级", self.start_firmware_update)
         row.addWidget(self.update_button)
+        row.addWidget(button("检查更新", self.check_updates))
         self.float_button = button("悬浮", self.show_floating)
         row.addWidget(self.float_button)
         header.addLayout(row)
@@ -241,6 +245,9 @@ class Window(QMainWindow):
         details.addWidget(self.link_badge)
         self.device_line = label("", "muted")
         details.addWidget(self.device_line, 1)
+        version = label(f"客户端 v{PC_VERSION}", "muted")
+        version.setAccessibleName(f"Windows 客户端版本 {PC_VERSION}")
+        details.addWidget(version)
         self.output_badge = label("主输出状态未知", "pill")
         details.addWidget(self.output_badge)
         header.addLayout(details)
@@ -266,6 +273,8 @@ class Window(QMainWindow):
         self.render()
         self.tray.show()
         self.floating.show_near(self)
+        if self.update_dialog is not None:
+            self.update_dialog.hide()
         dialog = self.history_pane.dialog
         if dialog is not None and dialog.isVisible():
             self.hidden_chart_dialog = dialog
@@ -478,6 +487,15 @@ class Window(QMainWindow):
             self.announce("正在读取设备信息…")
             self.launch("connect", self.worker.client.connect(self.kind, self.target.currentData()))
 
+    def check_updates(self):
+        if self.update_dialog is None:
+            self.update_dialog = UpdateDialog(self, self.info.get("firmware"))
+        else:
+            self.update_dialog.set_firmware(self.info.get("firmware"))
+        self.update_dialog.show()
+        self.update_dialog.raise_()
+        self.update_dialog.activateWindow()
+
     def start_firmware_update(self):
         if self.jobs or firmware_version(self.info) < MIN_FIRMWARE_VERSION:
             return
@@ -525,6 +543,8 @@ class Window(QMainWindow):
             self.history.clear()
         self.last_device = info["device_id"]
         self.info = info
+        if self.update_dialog is not None:
+            self.update_dialog.set_firmware(info.get("firmware"))
         self.period_ms = info.get("stream_period_ms", 500)
         self.refresh_sampling_options()
         self.refresh_opp_range()
@@ -540,6 +560,8 @@ class Window(QMainWindow):
     def disconnected(self, reason):
         hold = retains_outputs(self.info)
         self.info, self.state = {}, {}
+        if self.update_dialog is not None:
+            self.update_dialog.set_firmware(None)
         self.refresh_sampling_options()
         self.current_group = None
         self.history.pause()
@@ -981,6 +1003,8 @@ class Window(QMainWindow):
         if self.floating is not None:
             self.floating.hide()
             self.tray.hide()
+        if self.update_dialog is not None:
+            self.update_dialog.close()
         self.worker.stop()
         event.accept()
 
@@ -988,9 +1012,27 @@ class Window(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("直流电源控制台")
+    app.setApplicationVersion(PC_VERSION)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLES)
     app.setWindowIcon(icon())
     window = Window()
     window.show()
+    if len(sys.argv) == 3 and sys.argv[1] == "--release-smoke-test":
+        from pathlib import Path
+
+        def verify_frozen_startup():
+            result = 1
+            try:
+                import bleak.backends.winrt.client
+                import bleak.backends.winrt.scanner
+
+                if window.isVisible() and not window.windowIcon().isNull() and PC_VERSION in window.windowTitle():
+                    Path(sys.argv[2]).write_text(PC_VERSION, encoding="ascii")
+                    result = 0
+            finally:
+                window.close()
+                app.exit(result)
+
+        QTimer.singleShot(0, verify_frozen_startup)
     return app.exec()

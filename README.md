@@ -8,7 +8,7 @@
 
 ## 下载和使用
 
-1. 下载 Windows 便携客户端和配套固件。`.bin` 用于客户端升级，`.hex` 用于 ESP32 下载口烧录。 [发布下载](https://github.com/chuckie0329/power_module/releases/latest)
+1. 下载 Windows 便携客户端和配套固件。`.bin` 用于客户端升级，`.hex` 用于 ESP32 下载口烧录。 [Windows 发布列表](https://github.com/chuckie0329/power_module/releases) · [独立固件稳定版](updates/firmware-stable.json)
 2. 按接线表连接模块，核对 SX150C 的地址、通讯波特率及 M0 保护设置。 [硬件接线表](docs/简化硬件接线表.md) · [固件联调说明](firmware/README.md)
 3. 用 Windows 客户端选择 USB 串口或 BLE 连接。可调电压和限流，设定 OVP、OCP、OPP，切换及备注 M0～M10，并记录电压、电流和功率。默认采样为 20 Hz，曲线数据可导出为 CSV。 [客户端使用与构建说明](pc_client/README.md)
 
