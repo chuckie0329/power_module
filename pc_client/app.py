@@ -1077,7 +1077,7 @@ class Window(QMainWindow):
         values = {
             "voltage": (measured.get("voltage_mV"), 2),
             "current": (measured.get("current_mA"), 3),
-            "power": (measured.get("power_mW"), 1),
+            "power": (measured.get("power_mW"), 2),
         }
         for name, (value, digits) in values.items():
             self.meter_values[name].setText("—" if value is None else f"{value / 1000:.{digits}f}")

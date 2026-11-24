@@ -49,7 +49,7 @@ class FloatingPanel(QWidget):
         for key, unit, sample, name in (
             ("voltage", "V", " 40.00 V ", "输出电压"),
             ("current", "A", " 8.000 A ", "输出电流"),
-            ("power", "W", " 100.0 W ", "输出功率"),
+            ("power", "W", " 100.00 W ", "输出功率"),
         ):
             meter = QLabel(f"— {unit}")
             meter.setAccessibleName(name)

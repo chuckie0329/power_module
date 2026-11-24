@@ -44,14 +44,14 @@ class FloatingTests(unittest.TestCase):
         self.app.processEvents()
         return self.window.floating
 
-    def live(self, enabled=False, fresh=True, when=None):
+    def live(self, enabled=False, fresh=True, when=None, power=20800, legacy=True):
         when = time.monotonic() if when is None else when
         self.window.info = dict(device_id="sim", firmware="1.2.1", direct_control=True,
-                                sx_model_raw=4008, sx_version_raw=100)
+                                sx_model_raw=4008, sx_version_raw=100 if legacy else 200)
         self.window.state_read({
             "applied": dict(enabled=enabled, relay1=False, relay2=True, group=0,
                             voltage_mV=12000, current_mA=1000),
-            "measured": dict(fresh=fresh, voltage_mV=12010, current_mA=1730, power_mW=20800),
+            "measured": dict(fresh=fresh, voltage_mV=12010, current_mA=1730, power_mW=power),
             "state_rev": 7,
         }, when, False)
 
@@ -73,7 +73,7 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(frame.pixelColor(0, 0).alpha(), 0)
         self.assertIn(frame.pixelColor(4, panel.height() // 2).alpha(), range(1, 255))
         self.assertEqual([meter.text() for meter, _ in panel.values.values()],
-                         ["12.01 V", "0.173 A", "2.1 W"])
+                         ["12.01 V", "0.173 A", "2.08 W"])
         self.assertEqual([panel.relays[i].text() for i in (1, 2)], ["K1 关", "K2 开"])
         self.assertEqual(self.sent, [])
         panel.output.click()
@@ -91,6 +91,16 @@ class FloatingTests(unittest.TestCase):
         self.assertFalse(panel.isVisible())
         self.assertFalse(self.window.tray.isVisible())
         self.assertIs(self.window.worker, self.worker)
+
+    def test_live_power_has_two_decimals_in_both_views(self):
+        panel = self.enter()
+        for measured, expected in ((0, "0.00"), (21500, "21.50"), (2156, "2.16"), (2154, "2.15"), (100000, "100.00")):
+            with self.subTest(measured=measured):
+                self.live(power=measured, legacy=False)
+                self.assertEqual(self.window.meter_values["power"].text(), expected)
+                value, _ = panel.values["power"]
+                self.assertEqual(value.text(), expected + " W")
+                self.assertLessEqual(value.fontMetrics().horizontalAdvance(value.text()), value.width())
 
     def test_hidden_edits_and_stale_readings_never_turn_output_on(self):
         self.live()

@@ -2,7 +2,7 @@ name: ESP32 firmware
 
 on:
   push:
-    branches: [ci/fw-v1.2.2, ship/fw-v1.2.2]
+    branches: [ci/fw-v1.2.3, ship/fw-v1.2.3]
 
 permissions:
   contents: read
@@ -28,7 +28,9 @@ jobs:
           curl -fsSL --retry 3 https://codeload.github.com/bblanchon/ArduinoJson/tar.gz/refs/tags/v7.4.2 | tar -xz -C "$RUNNER_TEMP"
           g++ -std=c++17 -Wall -Wextra -I "$RUNNER_TEMP/ArduinoJson-7.4.2/src" -I firmware/PowerModule \
             tools/tests/reconnect_encoder.cpp firmware/PowerModule/Protocol.cpp -o "$RUNNER_TEMP/reconnect-encoder"
-          python3 -m tools.tests.check_firmware_release "$RUNNER_TEMP/reconnect-encoder" "$RUNNER_TEMP/esp32/PowerModule.ino.bin" 1.2.2
+          g++ -std=c++17 -Wall -Wextra -Werror -I firmware/PowerModule tools/tests/bond_recovery.cpp -o "$RUNNER_TEMP/bond-recovery"
+          "$RUNNER_TEMP/bond-recovery"
+          python3 -m tools.tests.check_firmware_release "$RUNNER_TEMP/reconnect-encoder" "$RUNNER_TEMP/esp32/PowerModule.ino.bin" 1.2.3
           mkdir -p dist
           cp "$RUNNER_TEMP/esp32/PowerModule.ino.bin" dist/PowerModule-ESP32.bin
       - uses: actions/upload-artifact@v4
@@ -38,7 +40,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/fw-v1.2.2'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/fw-v1.2.3'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -57,10 +59,10 @@ jobs:
           set -euo pipefail
           version="$(python3 -c 'from pc_client.firmware_update import FirmwareImage; print(FirmwareImage.load("dist/PowerModule-ESP32.bin").version)')"
           tag="fw-v$version"
-          test "$tag" = fw-v1.2.2
+          test "$tag" = fw-v1.2.3
           test "ship/$tag" = "$GITHUB_REF_NAME"
           test "$GITHUB_SHA" = "$(git ls-remote origin refs/heads/main | cut -f1)"
           (cd dist; sha256sum PowerModule-ESP32.bin > SHA256SUMS.txt)
           gh release create "$tag" dist/PowerModule-ESP32.bin dist/SHA256SUMS.txt \
             --target "$GITHUB_SHA" --latest=false --title "PowerModule ESP32 v$version" \
-            --notes "修复输出开启时，重连设备信息应答超长导致的超时。仅包含 ESP32 OTA 应用镜像；升级前关闭主输出和两路继电器。此发布不包含 Windows 客户端。"
+            --notes "新增经 USB 清除本设备保存的全部 BLE 配对，需配合 PC v1.0.2；不会重置电源设置或降低配对安全性。仅包含 OTA 应用镜像，升级前关闭主输出和两路继电器。"
