@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.2",
+    "version": "1.0.3",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.2/PowerModule-PC.exe",
-    "sha256": "5ec29e621dfb8f01a215b455183f0ebac10c06bb88ef434c9363e306f1fdff5e",
-    "size": 38663884,
-    "notes": "主窗口和悬浮窗的输出功率保留两位小数；新增 USB 清除蓝牙配对按钮，需 ESP32 1.2.3。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.3/PowerModule-PC.exe",
+    "sha256": "6307ff9df05b91204fb5cff4da75e59a2b6b62d42b60342a166fa2785ca82974",
+    "size": 38663508,
+    "notes": "修复「重新检查」可能读到 GitHub 旧缓存的问题。ESP32 固件仍为 v1.2.3。"
   }
 }
