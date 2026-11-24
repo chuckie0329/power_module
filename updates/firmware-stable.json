@@ -2,12 +2,12 @@
   "schema": 1,
   "kind": "firmware",
   "stable": {
-    "version": "1.2.2",
+    "version": "1.2.3",
     "target": "PowerModule-ESP32",
-    "protocol": 1,
-    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.2/PowerModule-ESP32.bin",
-    "sha256": "24590ba3c850828f4bdc454fc9af70fb59deeba88de1090b9e826ef8c6cfd2f7",
-    "size": 660208,
-    "notes": "修复输出开启时 USB 重连可能应答超时的问题。升级前关闭主输出和两路继电器。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.3/PowerModule-ESP32.bin",
+    "sha256": "d9f77810ba27682fce4be6593d4c646d890abd400bef214a08318f21eb54340e",
+    "size": 661760,
+    "notes": "支持经 USB 清除设备端蓝牙配对，需 PC 1.0.2。升级前关闭主输出和两路继电器。",
+    "protocol": 1
   }
 }

@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.1",
+    "version": "1.0.2",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.1/PowerModule-PC.exe",
-    "sha256": "2a245ea63063621f36f2d25f8094e47edf56164f09af2e0db46ab69ed7a19dbb",
-    "size": 38660927,
-    "notes": "统一客户端与固件升级入口；复用已校验的本地固件。PC v1.0.0 须手动下载并运行本版。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.2/PowerModule-PC.exe",
+    "sha256": "5ec29e621dfb8f01a215b455183f0ebac10c06bb88ef434c9363e306f1fdff5e",
+    "size": 38663884,
+    "notes": "主窗口和悬浮窗的输出功率保留两位小数；新增 USB 清除蓝牙配对按钮，需 ESP32 1.2.3。"
   }
 }
