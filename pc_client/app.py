@@ -1027,9 +1027,17 @@ def main():
                 import bleak.backends.winrt.client
                 import bleak.backends.winrt.scanner
 
-                if window.isVisible() and not window.windowIcon().isNull() and PC_VERSION in window.windowTitle():
-                    Path(sys.argv[2]).write_text(PC_VERSION, encoding="ascii")
+                panel = FloatingPanel()
+                panel.show()
+                app.processEvents()
+                compact = panel.isVisible() and panel.width() < 260 and panel.height() < 90
+                panel.hide()
+                marker = Path(sys.argv[2])
+                if window.isVisible() and not window.windowIcon().isNull() and PC_VERSION in window.windowTitle() and compact:
+                    marker.write_text(PC_VERSION, encoding="ascii")
                     result = 0
+                else:
+                    marker.write_text(f"main={window.isVisible()} floating={panel.width()}x{panel.height()}", encoding="ascii")
             finally:
                 window.close()
                 app.exit(result)

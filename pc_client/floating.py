@@ -83,14 +83,17 @@ class FloatingPanel(QWidget):
         for key, (meter, _) in self.values.items():
             meter.ensurePolished()
             meter.setFixedWidth(meter.fontMetrics().horizontalAdvance(samples[key]) + 5)
-        for widget, captions in (
-            (self.output, ("输出 开", "输出 关", "输出 —")),
-            *((widget, (f"K{channel} 开", f"K{channel} 关", f"K{channel} —"))
-              for channel, widget in self.relays.items()),
-        ):
+        switches = (self.output, *self.relays.values())
+        for widget in switches:
             widget.ensurePolished()
-            widget.setFixedWidth(max(widget.fontMetrics().horizontalAdvance(caption) for caption in captions) + 14)
-        self.setFixedSize(self.sizeHint())
+            longest = max(widget.fontMetrics().horizontalAdvance(widget.text()[:-1] + state)
+                          for state in ("开", "关", "—"))
+            widget.setFixedWidth(longest + 14)
+        widths = (sum(meter.width() for meter, _ in self.values.values()) + 4,
+                  sum(widget.width() for widget in switches) + 6)
+        height = max(meter.sizeHint().height() for meter, _ in self.values.values())
+        height += max(widget.sizeHint().height() for widget in switches)
+        self.setFixedSize(max(widths) + 14, height + 15)
 
     @staticmethod
     def _energized(button, on):

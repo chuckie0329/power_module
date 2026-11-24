@@ -17,5 +17,6 @@ if (-not $process.WaitForExit(45000)) {
     throw 'Frozen Windows client did not finish the GUI smoke test.'
 }
 if ($process.ExitCode -ne 0 -or -not (Test-Path $marker) -or (Get-Content -Raw $marker) -ne $version) {
-    throw 'Frozen Windows client failed to open its main window or load BLE imports.'
+    if (Test-Path $marker) { Get-Content -Raw $marker }
+    throw 'Frozen Windows client failed GUI startup, compact geometry, or BLE imports.'
 }
