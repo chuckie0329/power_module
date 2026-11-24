@@ -55,6 +55,12 @@ ERRORS = {
     "BAD_STREAM_PERIOD": "设备不支持这个采样频率。",
     "NVS_ERROR": "设备配置保存失败。",
     "CANCELLED": "前一操作已中断。",
+    "BLE_UNAVAILABLE": "设备蓝牙未就绪，未能清除配对。",
+    "BLE_ACTIVE": "设备有活动蓝牙连接。请先从已连接的电脑断开，然后重试。",
+    "BONDS_OUTPUT": "请先关闭主输出和两路继电器，并确认读回正常。",
+    "USB_ONLY": "只能通过 USB 清除设备端蓝牙配对。",
+    "BLE_BONDS_FAILED": "配对没有全部清除。可能已有部分条目被清除，请核对后再试。",
+    "BLE_ADVERTISING_FAILED": "配对已清除，但设备端蓝牙广播未恢复。请保持输出关闭，确认安全后再手动重启设备。",
     "OTA_BAD_IMAGE": "请选择校验通过的 PowerModule ESP32 应用固件（.bin）。",
     "OTA_NO_SLOT": "设备没有能容纳此固件的备用应用分区。",
     "OTA_OUTPUT": "请确认主输出和两路继电器均已关闭，再进行升级。",
@@ -241,6 +247,8 @@ class Window(QMainWindow):
         row.addWidget(self.connect_button)
         self.update_button = button("升级", self.check_updates)
         row.addWidget(self.update_button)
+        self.bond_button = button("清除蓝牙配对", self.clear_ble_bonds)
+        row.addWidget(self.bond_button)
         self.float_button = button("悬浮", self.show_floating)
         row.addWidget(self.float_button)
         header.addLayout(row)
@@ -567,6 +575,38 @@ class Window(QMainWindow):
         self.pc_handoff = False
         self.close()
 
+    def bond_recovery_status(self):
+        if self.kind != "usb" or not self.info:
+            return "请通过 USB 连接设备。"
+        if self.info.get("clear_ble_bonds") is not True:
+            return "当前设备固件不支持清除蓝牙配对。"
+        if self.jobs or self.pc_handoff or self.exit_requested:
+            return "请等待当前设备操作完成。"
+        applied = self.state.get("applied", {})
+        if (time.monotonic() - self.last_receipt >= 6
+                or self.state.get("measured", {}).get("fresh") is not True
+                or not all(applied.get(key) is False for key in ("enabled", "relay1", "relay2"))):
+            return "请先关闭主输出和两路继电器，并确认读回正常。"
+        return ""
+
+    def clear_ble_bonds(self):
+        if self.bond_recovery_status():
+            return
+        device = self.info["device_id"]
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("清除设备端蓝牙配对")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(f"清除 {device} 上保存的全部蓝牙配对？")
+        dialog.setInformativeText("所有曾配对的电脑都需要重新配对。不会重置设备或更改电源设置。")
+        yes, no = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
+        dialog.setStandardButtons(yes | no)
+        dialog.setDefaultButton(no)
+        if dialog.exec() != yes or self.bond_recovery_status() or self.info["device_id"] != device:
+            return
+        self.launch("清除蓝牙配对", self.worker.client.call(
+            "clear_ble_bonds", {"device_id": device, "confirm_all": True}))
+
     def firmware_upgrade_allowed(self):
         return bool(not self.pc_handoff and not self.jobs and firmware_version(self.info) >= MIN_FIRMWARE_VERSION)
 
@@ -723,6 +763,17 @@ class Window(QMainWindow):
     @Slot(str, object, str)
     def finished(self, action, result, error):
         self.jobs.discard(action)
+        if action == "清除蓝牙配对":
+            if error:
+                self.announce(error_text(error), True)
+            else:
+                count = (result or {}).get("data", {}).get("cleared")
+                if type(count) is int and count >= 0:
+                    self.announce(f"已清除 {count} 条设备端蓝牙配对。请在 Windows 中移除该设备后重新配对。")
+                else:
+                    self.announce("无法核对设备端配对清除的结果。", True)
+            self.render()
+            return
         if action in ("pc-disconnect", "pc-reconnect"):
             done, self.switch_done = self.switch_done, None
             if action == "pc-disconnect":
@@ -926,6 +977,9 @@ class Window(QMainWindow):
         self.connect_button.setText("断开" if connected else "连接")
         self.float_button.setEnabled(not self.exit_requested and not self.jobs & {"固件升级", "disconnect"})
         self.update_button.setEnabled(not self.exit_requested and not self.pc_handoff)
+        bond_problem = self.bond_recovery_status()
+        self.bond_button.setEnabled(not bond_problem)
+        self.bond_button.setToolTip(bond_problem or "仅清除此 ESP32 保存的全部蓝牙配对。")
         if self.update_dialog is not None:
             self.update_dialog._render()
         direct = bool(self.info.get("direct_control"))

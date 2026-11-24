@@ -22,7 +22,7 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             u.parse_catalog(self.doc, "firmware")
         self.assertGreater(u.version_key("1.10.0"), u.version_key("1.2.9"))
-        self.assertEqual(u.version_key(PC_VERSION), (1, 0, 1))
+        self.assertEqual(u.version_key(PC_VERSION), (1, 0, 2))
 
     def test_rejects_unpinned_wrong_kind_and_type(self):
         for changes in (

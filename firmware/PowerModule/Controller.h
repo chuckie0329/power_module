@@ -9,11 +9,12 @@
 namespace pm {
 
 using ReplySink = void (*)(Link, Message, uint32_t);
+using BondClear = const char* (*)(unsigned&);
 
 class Controller {
 public:
-    Controller(Sx150& sx, Preferences& preferences, ReplySink reply)
-        : sx_(sx), preferences_(preferences), reply_(reply) {}
+    Controller(Sx150& sx, Preferences& preferences, ReplySink reply, BondClear clearBonds = nullptr)
+        : sx_(sx), preferences_(preferences), reply_(reply), clearBonds_(clearBonds) {}
 
     void begin(const char* name, unsigned sxBaud, uint8_t sxAddress);
     void bleChanged(uint32_t generation, uint16_t minPeriod);
@@ -29,7 +30,7 @@ public:
     uint32_t stateRevision() const { return stateRev_; }
 
 private:
-    enum class Op { SetOutput, SetProtection, SetOpp, MatchOcp, SelectGroup, Relay, Stop, Save };
+    enum class Op { SetOutput, SetProtection, SetOpp, MatchOcp, SelectGroup, Relay, Stop, Save, ClearBonds };
 
     struct Request {
         Link link;
@@ -94,7 +95,7 @@ private:
     void fillInfo(JsonObject info) const;
     Message response(uint32_t id, const char* code, const JsonDocument* data = nullptr) const;
     void send(Link link, uint32_t id, const char* code, const JsonDocument* data = nullptr);
-    void finish(Request& request, const char* code);
+    void finish(Request& request, const char* code, const JsonDocument* data = nullptr);
     uint16_t minStreamMs(Link link) const;
     static size_t linkIndex(Link link) { return link == Link::Usb ? 0 : 1; }
     uint32_t generation(Link link) const { return link == Link::Ble ? bleGeneration_ : 0; }
@@ -102,6 +103,7 @@ private:
     Sx150& sx_;
     Preferences& preferences_;
     ReplySink reply_;
+    BondClear clearBonds_;
     Message name_;
     unsigned sxBaud_ = kDefaultSxBaud;
     uint8_t sxAddress_ = kDefaultSxAddress;

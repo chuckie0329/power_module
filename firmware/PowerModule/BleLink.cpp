@@ -1,4 +1,5 @@
 #include "BleLink.h"
+#include "BondRecovery.h"
 #include <Arduino.h>
 #include <cstring>
 
@@ -33,7 +34,32 @@ bool BleLink::begin(const char* name, const Message& info) {
     auto advertising = NimBLEDevice::getAdvertising();
     advertising->addServiceUUID(kService);
     advertising->setName(name);
-    return advertising->start();
+    ready_ = advertising->start();
+    return ready_;
+}
+
+const char* BleLink::clearBonds(unsigned& cleared) {
+    if (!ready_) return "BLE_UNAVAILABLE";
+#if MYNEWT_VAL(BLE_STORE_MAX_BONDS)
+    struct Bonds {
+        std::atomic<uint16_t>& handle;
+        NimBLEAdvertising* adv;
+        ble_addr_t peers[MYNEWT_VAL(BLE_STORE_MAX_BONDS)]{};
+        bool active() { return handle.load() != BLE_HS_CONN_HANDLE_NONE; }
+        bool advertising() { return adv->isAdvertising(); }
+        bool stopAdvertising() { return adv->stop(); }
+        bool startAdvertising() { return adv->start(); }
+        bool enumerate(int& count) {
+            return ble_store_util_bonded_peers(peers, &count, MYNEWT_VAL(BLE_STORE_MAX_BONDS)) == 0;
+        }
+        bool connected(int i) { return ble_gap_conn_find_by_addr(&peers[i], nullptr) == 0; }
+        // Unlike 2.3.8 deleteAllBonds(), unpair updates the controller resolving list.
+        bool remove(int i) { return NimBLEDevice::deleteBond(NimBLEAddress(peers[i])); }
+    } bonds{handle_, NimBLEDevice::getAdvertising()};
+    return recoverBonds(bonds, cleared);
+#else
+    return "BLE_UNAVAILABLE";
+#endif
 }
 
 void BleLink::onConnect(NimBLEServer* server, NimBLEConnInfo& info) {

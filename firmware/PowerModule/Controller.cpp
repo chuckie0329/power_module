@@ -243,6 +243,17 @@ void Controller::receive(Link link, const Message& line) {
         request.op = Op::Relay;
         request.channel = channel - 1;
         request.enabled = args["enabled"].as<bool>();
+    } else if (op == "clear_ble_bonds") {
+        if (link != Link::Usb) {
+            send(link, id, "USB_ONLY");
+            return;
+        }
+        if (args.size() != 2 || asText(args["device_id"]) != name_ ||
+            !args["confirm_all"].is<bool>() || !args["confirm_all"].as<bool>()) {
+            send(link, id, "BAD_ARGS");
+            return;
+        }
+        request.op = Op::ClearBonds;
     } else if (op != "save_config") {
         send(link, id, "BAD_OP");
         return;
@@ -265,8 +276,8 @@ void Controller::receive(Link link, const Message& line) {
     pending_ = std::move(request);
 }
 
-void Controller::finish(Request& request, const char* code) {
-    auto message = response(request.id, code);
+void Controller::finish(Request& request, const char* code, const JsonDocument* data) {
+    auto message = response(request.id, code, data);
     auto& client = clients_[linkIndex(request.link)];
     if (client.id == request.clientId && generation(request.link) == request.generation) {
         client.cache[client.nextCache] = {request.id, std::move(request.canonical), message};
@@ -324,6 +335,7 @@ void Controller::runRequest() {
     running_ = std::move(pending_);
     pending_.reset();
     const char* code = nullptr;
+    JsonDocument result;
     switch (running_->op) {
         case Op::SetOutput: code = executeSet(*running_); break;
         case Op::SetProtection:
@@ -332,9 +344,18 @@ void Controller::runRequest() {
         case Op::SelectGroup: code = selectGroup(*running_); break;
         case Op::Relay: setRelay(running_->channel, running_->enabled); break;
         case Op::Save: code = saveConfig(); break;
+        case Op::ClearBonds: {
+            unsigned cleared = 0;
+            if (update_.locksOutputs() || updateRequest_ || processingUpdate_) code = "OTA_BUSY";
+            else if (!outputsVerifiedOff()) code = "BONDS_OUTPUT";
+            else if (!clearBonds_) code = "BLE_UNAVAILABLE";
+            else code = clearBonds_(cleared);
+            result["cleared"] = cleared;
+            break;
+        }
         default: code = "BAD_OP"; break;
     }
-    finish(*running_, code ? code : abortRegular_ ? "CANCELLED" : nullptr);
+    finish(*running_, code ? code : abortRegular_ ? "CANCELLED" : nullptr, result.isNull() ? nullptr : &result);
     running_.reset();
 }
 
@@ -724,6 +745,7 @@ void Controller::fillInfo(JsonObject info) const {
     info["output_off"] = true;
     info["direct_control"] = true;
     info["group_select"] = true;
+    info["clear_ble_bonds"] = clearBonds_ != nullptr;
     info["stream_period"] = true;
     info["sx_model_raw"] = nullptr;
     info["sx_version_raw"] = nullptr;

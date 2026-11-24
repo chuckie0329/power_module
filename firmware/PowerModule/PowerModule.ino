@@ -14,7 +14,7 @@ void sendReply(Link link, Message message, uint32_t bleGeneration);
 Preferences storage;
 BleLink ble;
 Sx150 sx(Serial2, serviceLinks);
-Controller controller(sx, storage, sendReply);
+Controller controller(sx, storage, sendReply, [](unsigned& count) { return ble.clearBonds(count); });
 LineReader usbInput;
 Outbox usbReplies;
 Message usbTx;

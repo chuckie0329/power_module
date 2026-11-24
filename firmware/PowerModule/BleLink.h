@@ -12,6 +12,7 @@ class BleLink final : private NimBLEServerCallbacks, private NimBLECharacteristi
 public:
     bool begin(const char* name, const Message& info);
     void tick();
+    const char* clearBonds(unsigned& cleared);
     uint32_t generation() const { return generation_.load(); }
     Receive receive(Message& message);
     void reply(Message message, uint32_t generation);
@@ -46,6 +47,7 @@ private:
     size_t fragment(SendCursor& cursor, const Message& message, uint8_t* frame);
     bool advance(SendCursor& cursor, const Message& message);
 
+    bool ready_ = false;
     NimBLEServer* server_ = nullptr;
     NimBLECharacteristic* rsp_ = nullptr;
     NimBLECharacteristic* state_ = nullptr;
