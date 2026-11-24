@@ -16,6 +16,7 @@ from pc_client.connection import BleLink, LinkWorker, firmware_version, retains_
 from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
 from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
+from pc_client.pc_upgrade import pending_handoff, smoke_handoff, smoke_startup
 from pc_client.theme import STYLES, icon
 from pc_client.update_dialog import UpdateDialog
 from pc_client.version import PC_VERSION
@@ -152,6 +153,10 @@ class Window(QMainWindow):
         self.tray = None
         self.hidden_chart_dialog = None
         self.update_dialog = None
+        self.pc_handoff = False
+        self.saved_pc_resume = None
+        self.connect_target = None
+        self.switch_done = None
 
         page = QWidget()
         page.setObjectName("page")
@@ -234,9 +239,8 @@ class Window(QMainWindow):
         row.addWidget(self.refresh)
         self.connect_button = button("连接", self.toggle_connection, "primary")
         row.addWidget(self.connect_button)
-        self.update_button = button("固件升级", self.start_firmware_update)
+        self.update_button = button("升级", self.check_updates)
         row.addWidget(self.update_button)
-        row.addWidget(button("检查更新", self.check_updates))
         self.float_button = button("悬浮", self.show_floating)
         row.addWidget(self.float_button)
         header.addLayout(row)
@@ -480,12 +484,15 @@ class Window(QMainWindow):
         self.refresh_targets()
 
     def toggle_connection(self):
+        if self.pc_handoff:
+            return
         if self.info:
             self.announce("正在断开…")
             self.launch("disconnect", self.worker.client.close())
         elif self.target.currentData() is not None:
+            self.connect_target = self.target.currentData()
             self.announce("正在读取设备信息…")
-            self.launch("connect", self.worker.client.connect(self.kind, self.target.currentData()))
+            self.launch("connect", self.worker.client.connect(self.kind, self.connect_target))
 
     def check_updates(self):
         if self.update_dialog is None:
@@ -495,15 +502,88 @@ class Window(QMainWindow):
         self.update_dialog.show()
         self.update_dialog.raise_()
         self.update_dialog.activateWindow()
+        if self.update_dialog.checked is None:
+            self.update_dialog.check_all()
 
-    def start_firmware_update(self):
-        if self.jobs or firmware_version(self.info) < MIN_FIRMWARE_VERSION:
+    def pc_upgrade_blocker(self):
+        if self.info and not retains_outputs(self.info):
+            applied = self.state.get("applied", {})
+            if (time.monotonic() - self.last_receipt >= 6
+                    or self.state.get("measured", {}).get("fresh") is not True
+                    or not all(applied.get(key) is False for key in ("enabled", "relay1", "relay2"))):
+                return "旧固件断开时可能关断输出。请先确认主输出和两路继电器均已关闭，再升级客户端。"
+        if self.jobs or self.exit_requested or self.pc_handoff:
+            return "请等待当前设备操作完成后再升级客户端。"
+        if self.info and self.connect_target is None:
+            return "无法确定当前设备的连接地址，请先手动重连。"
+        return ""
+
+    def prepare_pc_switch(self, done):
+        if problem := self.pc_upgrade_blocker():
+            done(None, problem)
             return
-        filename, _ = QFileDialog.getOpenFileName(self, "选择升级固件", "", "PowerModule 固件 (*.bin)")
+        self.pc_handoff = True
+        self.setEnabled(False)
+        self.saved_pc_resume = None
+        self.render()
+        if not self.info:
+            done(None, "")
+            return
+        target = self.connect_target
+        self.saved_pc_resume = dict(mode=self.kind, target=getattr(target, "address", target),
+                                    device_id=self.info["device_id"])
+        self.switch_done = done
+        self.launch("pc-disconnect", self.worker.client.close())
+
+    def resume_pc_link(self, resume, done):
+        if not resume:
+            done("")
+            return
+        mode, target, device = (resume[key] for key in ("mode", "target", "device_id"))
+        self.kind = mode
+        self.refresh.setText("扫描" if mode == "ble" else "刷新")
+        self.connect_target = target
+        with QSignalBlocker(self.transport), QSignalBlocker(self.target):
+            self.transport.setCurrentIndex(self.transport.findData(mode))
+            self.target.clear()
+            self.target.addItem(target, target)
+        self.switch_done = done
+        self.launch("pc-reconnect", self.worker.client.connect(mode, target, expected_device=device))
+
+    def cancel_pc_switch(self, done):
+        resume, self.saved_pc_resume = self.saved_pc_resume, None
+        if resume and not self.info:
+            self.resume_pc_link(resume, lambda error: self.finish_pc_switch_recovery(done, error))
+        else:
+            self.finish_pc_switch_recovery(done, "")
+
+    def finish_pc_switch_recovery(self, done, error):
+        self.pc_handoff = False
+        self.setEnabled(True)
+        self.render()
+        done(error)
+
+    def close_for_pc_switch(self):
+        self.pc_handoff = False
+        self.close()
+
+    def firmware_upgrade_allowed(self):
+        return bool(not self.pc_handoff and not self.jobs and firmware_version(self.info) >= MIN_FIRMWARE_VERSION)
+
+    def start_firmware_update(self, filename=None, verified=None):
+        if not self.firmware_upgrade_allowed():
+            self.announce("连接支持在线升级的设备后再安装固件。", True)
+            return False
+        if filename is None:
+            filename, _ = QFileDialog.getOpenFileName(self, "选择升级固件", "", "PowerModule 固件 (*.bin)")
         if not filename:
             return
         try:
             image = FirmwareImage.load(filename)
+            if verified is not None and (image.digest, image.version, len(image.data)) != (
+                    verified.sha256, verified.version, verified.size):
+                self.announce("本地固件已改变，请重新检查或下载。", True)
+                return False
         except ValueError as error:
             self.announce(error_text(str(error)), True)
             return
@@ -513,13 +593,18 @@ class Window(QMainWindow):
         prompt = (f"为 {self.info['device_id']} 安装 v{image.version}。"
                   f"当前版本为 v{self.info['firmware']}。\n"
                   "请关闭主输出和两路继电器。升级校验完成后设备会重启。")
+        identity = self.info["device_id"], self.info["firmware"]
         yes = QMessageBox.StandardButton.Yes
         no = QMessageBox.StandardButton.No
         if QMessageBox.question(self, "安装固件", prompt, yes | no, no) != yes:
-            return
+            return False
+        if not self.firmware_upgrade_allowed() or identity != (
+                self.info.get("device_id"), self.info.get("firmware")):
+            return False
         self.update_cancel = Event()
         self.launch("固件升级", self.worker.client.update_firmware(image, self.update_cancel.is_set))
         self.show_update_progress(0, len(image.data), "transfer")
+        return True
 
     def cancel_firmware_update(self):
         self.update_cancel.set()
@@ -631,13 +716,21 @@ class Window(QMainWindow):
 
     def update_sampling(self):
         period = self.sampling.currentData()
-        if (self.info.get("stream_period") and period is not None and period != self.period_ms
+        if (not self.pc_handoff and self.info.get("stream_period") and period is not None and period != self.period_ms
                 and not self.jobs & {"采样频率", "固件升级"}):
             self.launch("采样频率", self.worker.client.call("set_stream_period", {"period_ms": period}))
 
     @Slot(str, object, str)
     def finished(self, action, result, error):
         self.jobs.discard(action)
+        if action in ("pc-disconnect", "pc-reconnect"):
+            done, self.switch_done = self.switch_done, None
+            if action == "pc-disconnect":
+                done(self.saved_pc_resume, error or ("" if result else "未能确认旧客户端已断开。"))
+            else:
+                done(error or ("" if self.info else "未能确认原设备连接。"))
+            self.render()
+            return
         if action == "固件升级":
             self.update_panel.hide()
             if error:
@@ -825,16 +918,16 @@ class Window(QMainWindow):
         enabled = applied.get("enabled") if fresh else None
         busy = bool(self.jobs)
         link_pending = bool(self.jobs & {"scan", "connect", "disconnect", "固件升级"})
+        link_pending = link_pending or self.pc_handoff
         self.transport.setEnabled(not connected and not link_pending)
         self.target.setEnabled(not connected and not link_pending)
         self.refresh.setEnabled(not connected and not link_pending)
         self.connect_button.setEnabled(not link_pending and (connected or self.target.count() > 0))
         self.connect_button.setText("断开" if connected else "连接")
         self.float_button.setEnabled(not self.exit_requested and not self.jobs & {"固件升级", "disconnect"})
-        supports_update = firmware_version(self.info) >= MIN_FIRMWARE_VERSION
-        self.update_button.setEnabled(connected and supports_update and not busy)
-        self.update_button.setToolTip("先用 COM3 安装 v1.2.0 或更新版本以启用升级。"
-                                      if connected and not supports_update else "")
+        self.update_button.setEnabled(not self.exit_requested and not self.pc_handoff)
+        if self.update_dialog is not None:
+            self.update_dialog._render()
         direct = bool(self.info.get("direct_control"))
         self.link_badge.setText(("已连接" if direct else "只读连接") if active
                                 else "等待数据" if connected else "未连接")
@@ -878,12 +971,12 @@ class Window(QMainWindow):
             self.group_note.setToolTip(selected_tooltip)
         self.protection_title.setText(f"M{self.current_group} 保护阈值" if fresh and self.current_group is not None
                                       else "保护阈值")
-        normal_control = direct and active and not busy
+        normal_control = direct and active and not busy and not self.pc_handoff
         group_ready = enabled is not None and self.current_group is not None
         can_select_group = normal_control and group_ready and self.info.get("group_select")
         same_group = self.group_selector.currentData() == self.current_group
-        self.group_selector.setEnabled(connected and not busy)
-        self.group_edit.setEnabled(connected and not busy)
+        self.group_selector.setEnabled(connected and not busy and not self.pc_handoff)
+        self.group_edit.setEnabled(connected and not busy and not self.pc_handoff)
         self.switch_group.setEnabled(bool(can_select_group) and not same_group)
         settable = normal_control and group_ready and same_group
         self.voltage.setEnabled(settable)
@@ -898,7 +991,7 @@ class Window(QMainWindow):
         self.output_switch.setToolTip(
             "主输出状态待确认，可发送关断命令。" if self.output_requests_off and enabled is None else ""
         )
-        self.sampling.setEnabled(not busy and (not connected or bool(self.info.get("stream_period"))))
+        self.sampling.setEnabled(not busy and not self.pc_handoff and (not connected or bool(self.info.get("stream_period"))))
         self.sampling.setToolTip("蓝牙档位取决于连接协商和 SX 串口速率。曲线底部显示实际频率。" if self.kind == "ble"
                                  else "选择 USB 目标采样频率。曲线底部显示实际频率。")
 
@@ -989,6 +1082,9 @@ class Window(QMainWindow):
                 widget.setValue(value / 1000)
 
     def closeEvent(self, event):
+        if self.pc_handoff:
+            event.ignore()
+            return
         if "固件升级" in self.jobs:
             self.exit_requested = True
             self.cancel_firmware_update()
@@ -1016,8 +1112,54 @@ def main():
     app.setStyle("Fusion")
     app.setStyleSheet(STYLES)
     app.setWindowIcon(icon())
+    try:
+        handoff = pending_handoff()
+    except (OSError, ValueError, RuntimeError):
+        return 1
     window = Window()
     window.show()
+    if smoke_startup(window, app) or (handoff and smoke_handoff(handoff, app)):
+        return app.exec()
+    if handoff:
+        window.pc_handoff = True
+        window.setEnabled(False)
+        window.announce("正在完成客户端切换…")
+        timer = QTimer(window)
+        timer.setInterval(200)
+        acknowledged = False
+
+        def check_switch():
+            if acknowledged and handoff.resume and window.info.get("device_id") != handoff.resume["device_id"]:
+                handoff.reject("新版客户端连接在切换时中断。")
+            state = handoff.poll()
+            if state == "pending":
+                return
+            timer.stop()
+            if state == "abort":
+                # Do not send the normal graceful disconnect during a rollback.
+                window.worker.stop()
+                app.exit(1)
+                return
+            window.pc_handoff = False
+            window.setEnabled(True)
+            window.announce("新版已启动，但未能移除旧客户端；旧文件已保留。" if state == "cleanup-failed"
+                            else "客户端升级完成。", state == "cleanup-failed")
+            window.render()
+
+        def ready(error):
+            nonlocal acknowledged
+            if error or not window.isVisible() or window.windowIcon().isNull() or PC_VERSION not in window.windowTitle():
+                handoff.reject(error or "新版未能完成界面初始化。")
+                return
+            handoff.acknowledge()
+            acknowledged = True
+
+        def start_switch():
+            window.resume_pc_link(handoff.resume, ready)
+
+        timer.timeout.connect(check_switch)
+        timer.start()
+        QTimer.singleShot(0, start_switch)
     if len(sys.argv) == 3 and sys.argv[1] == "--release-smoke-test":
         from pathlib import Path
 

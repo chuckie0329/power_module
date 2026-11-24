@@ -2,7 +2,7 @@ name: Windows PC client
 
 on:
   push:
-    branches: [main, ci/pc-v1.0.0, ship/pc-v1.0.0]
+    branches: [main, ci/pc-v1.0.1, ship/pc-v1.0.1]
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,8 @@ jobs:
       - name: Start the frozen Windows GUI and check resources
         if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         run: ./tools/smoke_pc_windows.ps1
+      - name: Exercise self-update handoff on Windows
+        run: ./tools/smoke_pc_upgrade_windows.ps1
       - name: Retain verified executable
         uses: actions/upload-artifact@v4
         with:
@@ -40,7 +42,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.0'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.1'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -60,9 +62,10 @@ jobs:
           set -euo pipefail
           version="$(python3 -c 'from pc_client.version import PC_VERSION; print(PC_VERSION)')"
           tag="pc-v$version"
+          test "$tag" = pc-v1.0.1
           test "ship/$tag" = "$GITHUB_REF_NAME"
           test "$GITHUB_SHA" = "$(git ls-remote origin refs/heads/main | cut -f1)"
           (cd dist; sha256sum PowerModule-PC.exe > SHA256SUMS.txt)
           gh release create "$tag" dist/PowerModule-PC.exe dist/SHA256SUMS.txt \
             --target "$GITHUB_SHA" --latest=false --title "PowerModule PC v$version" \
-            --notes "Windows x64 客户端单独发布：半透明悬浮窗、托盘、原版图标及独立在线更新检查。此发布不含 ESP32 固件。"
+            --notes "统一客户端与固件升级入口；复用已校验的本地固件；新版客户端启动并重连原设备后才移除旧 EXE。首次从 v1.0.0 升级须手动下载并运行。此发布不含 ESP32 固件。"

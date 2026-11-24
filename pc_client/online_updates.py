@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 import re
+import stat
 from tempfile import NamedTemporaryFile
 from time import monotonic
 from urllib.parse import urlsplit
@@ -135,16 +136,125 @@ def _is_windows_x64_gui(path):
             and head[24:26] == b"\x0b\x02" and head[92:94] == b"\x02\x00")
 
 
+def _check_update(update, kind):
+    if update.kind != kind:
+        raise ValueError("更新类型不匹配。")
+    version_key(update.version)
+    if (update.url != release_url(kind, update.version)
+            or not re.fullmatch(r"[0-9a-f]{64}", update.sha256)
+            or type(update.size) is not int or not 0 < update.size <= LIMITS[kind]):
+        raise ValueError("更新地址、校验和或文件大小无效。")
+
+
+def _plain_file(path, size):
+    metadata = path.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size != size
+            or metadata.st_nlink != 1
+            or getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+        raise ValueError("更新文件不是大小匹配的普通文件。")
+
+
+def _windows_file_version(path):
+    # Read the fixed FILEVERSION resource, not an arbitrary version string in the PE.
+    if sys.platform != "win32":
+        raise OSError("只能在 Windows 上验证客户端升级文件。")
+    import ctypes
+    from ctypes import wintypes
+
+    api = ctypes.WinDLL("version.dll", winmode=0x00000800)  # LOAD_LIBRARY_SEARCH_SYSTEM32
+    size_of = api.GetFileVersionInfoSizeW
+    size_of.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+    size_of.restype = wintypes.DWORD
+    get_info = api.GetFileVersionInfoW
+    get_info.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID]
+    get_info.restype = wintypes.BOOL
+    query = api.VerQueryValueW
+    query.argtypes = [wintypes.LPCVOID, wintypes.LPCWSTR,
+                      ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.UINT)]
+    query.restype = wintypes.BOOL
+
+    filename = str(path.absolute())
+    handle = wintypes.DWORD()
+    size = size_of(filename, ctypes.byref(handle))
+    if not 0 < size <= 65536:
+        return None
+    data = ctypes.create_string_buffer(size)
+    if not get_info(filename, 0, size, data):
+        return None
+    fixed, length = wintypes.LPVOID(), wintypes.UINT()
+    if not query(data, "\\", ctypes.byref(fixed), ctypes.byref(length)) or length.value < 52 or not fixed:
+        return None
+    signature, _, high, low = (wintypes.DWORD * 4).from_address(fixed.value)
+    if signature != 0xFEEF04BD:
+        return None
+    return high >> 16, high & 0xFFFF, low >> 16, low & 0xFFFF
+
+
+def verify_client(update, path):
+    """Verify the exact catalog asset before executing an update."""
+    _check_update(update, "pc")
+    path = Path(path)
+    _plain_file(path, update.size)
+    digest, remaining = sha256(), update.size
+    with path.open("rb") as source:
+        while remaining and (chunk := source.read(min(remaining, 64 * 1024))):
+            remaining -= len(chunk)
+            digest.update(chunk)
+        if remaining or source.read(1) or digest.hexdigest() != update.sha256:
+            raise ValueError("客户端文件校验失败。")
+    if not _is_windows_x64_gui(path) or _windows_file_version(path) != (*version_key(update.version), 0):
+        raise ValueError("客户端架构或内嵌版本与更新清单不符。")
+
+
+def firmware_cached(update, directory):
+    """Return the managed firmware only if every stable catalog check matches."""
+    _check_update(update, "firmware")
+    target = Path(directory) / FIRMWARE_ASSET
+    try:
+        _plain_file(target, update.size)
+        image = FirmwareImage.load(target)
+        if len(image.data) == update.size and image.digest == update.sha256 and image.version == update.version:
+            return target
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def cache_firmware(update, directory):
+    """Keep the prior cache intact until an authenticated replacement is ready."""
+    if target := firmware_cached(update, directory):
+        return target
+    target = Path(directory) / FIRMWARE_ASSET
+    _download(update, target, replace=True)
+    return target
+
+
+def download_client(update, directory):
+    """Save a strictly verified versioned EXE without replacing another file."""
+    _check_update(update, "pc")
+    target = Path(directory) / update.filename
+    try:
+        _download(update, target, strict_client=True)
+    except FileExistsError:
+        verify_client(update, target)
+    return target
+
+
 def download(update, destination):
-    """Save to an adjacent temporary file; never overwrite an existing destination."""
+    """Save a manual download without replacing an existing destination."""
+    _download(update, destination)
+
+
+def _download(update, destination, *, replace=False, strict_client=False):
+    _check_update(update, update.kind)
     destination = Path(destination)
-    if destination.exists():
+    if not replace and (destination.exists() or destination.is_symlink()):
         raise FileExistsError("文件已经存在。请选择新文件名，以便保留旧版本。")
     tmp_path = None
     digest, size = sha256(), 0
     deadline = monotonic() + DOWNLOAD_SECONDS
     try:
-        with NamedTemporaryFile(dir=destination.parent, delete=False, suffix=".download") as temp:
+        with NamedTemporaryFile(dir=destination.parent, delete=False, suffix=".exe" if strict_client else ".download") as temp:
             tmp_path = Path(temp.name)
             with _open(update.url, DOWNLOAD_HOSTS) as source:
                 while chunk := source.read(64 * 1024):
@@ -155,16 +265,22 @@ def download(update, destination):
                         raise ValueError("文件超出清单中的大小。")
                     temp.write(chunk)
                     digest.update(chunk)
+            temp.flush()
+            os.fsync(temp.fileno())
         if size != update.size or digest.hexdigest() != update.sha256:
             raise ValueError("下载校验失败，未保存文件。")
         if update.kind == "firmware" and FirmwareImage.load(tmp_path).version != update.version:
             raise ValueError("固件内嵌版本与清单不符。")
-        if update.kind == "pc" and not _is_windows_x64_gui(tmp_path):
+        if strict_client:
+            verify_client(update, tmp_path)
+        elif update.kind == "pc" and not _is_windows_x64_gui(tmp_path):
             raise ValueError("文件不是 Windows x64 客户端。")
         try:
             # Windows rename refuses to replace an existing target. On POSIX
             # use a same-directory hard link for that same atomic no-clobber rule.
-            if sys.platform == "win32":
+            if replace:
+                tmp_path.replace(destination)
+            elif sys.platform == "win32":
                 tmp_path.rename(destination)
             else:
                 os.link(tmp_path, destination)

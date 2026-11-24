@@ -148,7 +148,7 @@ class Client:
         self.closing = False
         self.updating = False
 
-    async def connect(self, mode, target):
+    async def connect(self, mode, target, expected_device=None):
         if self.link:
             raise DeviceError("BUSY")
         self.latest = {}
@@ -169,6 +169,14 @@ class Client:
                 raise DeviceError("BAD_VERSION")
             if self.link is not link:
                 raise DeviceError("LINK_ERROR")
+            if expected_device is not None:
+                if info["device_id"] != expected_device:
+                    raise DeviceError("OTA_DEVICE")
+                reply = await self.call("get_state")
+                applied = reply.get("applied")
+                if (self.link is not link or not isinstance(applied, dict)
+                        or any(type(applied.get(k)) is not bool for k in ("enabled", "relay1", "relay2"))):
+                    raise DeviceError("LINK_ERROR")
             self.info = info
             self.ready = True
             self.monitor = asyncio.create_task(self.monitor_link(link))
@@ -414,6 +422,7 @@ class Client:
                     reason = "设备连接已失效"
             self.closing = False
             self.worker.disconnected.emit(reason)
+        return not reason
 
 
 class LinkWorker(QObject):
