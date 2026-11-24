@@ -6,7 +6,7 @@ from threading import Thread
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QPushButton
 
-from pc_client.online_updates import cache_firmware, check_catalog, download_client, version_key
+from pc_client.online_updates import cache_firmware, catalog_revision, check_catalog, download_client, version_key
 from pc_client.pc_upgrade import launch, verify_predecessor
 from pc_client.version import PC_VERSION
 
@@ -77,9 +77,13 @@ class UpdateDialog(QDialog):
 
         def get():
             result = {}
+            try:
+                revision = catalog_revision()
+            except (OSError, ValueError):
+                return dict.fromkeys(("pc", "firmware"), (None, "无法验证最新清单版本"))
             for kind in ("pc", "firmware"):
                 try:
-                    result[kind] = check_catalog(kind), ""
+                    result[kind] = check_catalog(kind, revision=revision), ""
                 except Exception:
                     result[kind] = None, "无法读取或验证清单"
             return result

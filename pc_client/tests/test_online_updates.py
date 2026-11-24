@@ -22,7 +22,7 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             u.parse_catalog(self.doc, "firmware")
         self.assertGreater(u.version_key("1.10.0"), u.version_key("1.2.9"))
-        self.assertEqual(u.version_key(PC_VERSION), (1, 0, 2))
+        self.assertEqual(u.version_key(PC_VERSION), (1, 0, 3))
 
     def test_rejects_unpinned_wrong_kind_and_type(self):
         for changes in (
@@ -62,7 +62,54 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(u._allowed("https://release-assets.githubusercontent.com/file", u.DOWNLOAD_HOSTS))
         with patch.object(u, "_open", return_value=io.BytesIO(b" " * (u.MAX_CATALOG_BYTES + 1))):
             with self.assertRaisesRegex(ValueError, "过大"):
-                u.check_catalog("pc")
+                u.check_catalog("pc", revision="a" * 40)
+
+    def test_manual_catalog_fetch_follows_fresh_main_revision_when_raw_main_is_stale(self):
+        first, second = "a" * 40, "b" * 40
+        def pkt(data):
+            return f"{len(data) + 4:04x}".encode() + data
+        def advertised(sha):
+            return (b"001e# service=git-upload-pack\n0000" + pkt(b"c" * 40 + b" HEAD\0thin-pack\n")
+                    + pkt(sha.encode() + b" refs/heads/main\n") + b"0000")
+        advertised_refs = iter([first, second])
+        opened = []
+        def serve(url, hosts, *, revalidate=False):
+            opened.append(url)
+            if url == u.GIT_REFS:
+                self.assertEqual(hosts, {"github.com"})
+                self.assertTrue(revalidate)
+                return io.BytesIO(advertised(next(advertised_refs)))
+            self.assertEqual(hosts, {"raw.githubusercontent.com"})
+            self.assertFalse(revalidate)
+            if f"/{first}/" in url:
+                return io.BytesIO(json.dumps(self.doc).encode())
+            self.assertIn(f"/{second}/", url)
+            return io.BytesIO(json.dumps(dict(self.doc, stable=dict(self.item, version="1.0.2",
+                                               url=u.release_url("pc", "1.0.2")))).encode())
+        with patch.object(u, "_open", side_effect=serve):
+            self.assertEqual(u.check_catalog("pc").version, self.item["version"])
+            self.assertEqual(u.check_catalog("pc").version, "1.0.2")
+        self.assertEqual(len(opened), 4)
+        self.assertFalse(any("/main/updates/" in url for url in opened))
+
+    def test_ref_parser_requires_a_single_well_formed_main_packet(self):
+        service = b"001e# service=git-upload-pack\n0000"
+        def pkt(data):
+            return f"{len(data) + 4:04x}".encode() + data
+        good = pkt(b"a" * 40 + b" refs/heads/main\n")
+        for invalid in (
+            b"",
+            service + pkt(b"a" * 40 + b" refs/tags/main\n") + b"0000",
+            service + pkt(b"a" * 39 + b" refs/heads/main\n") + b"0000",
+            service + pkt(b"0" * 40 + b" refs/heads/main\n") + b"0000",
+            service + good + good + b"0000",
+            service + good + b"0000garbage",
+            service + good[:-1],
+            b"x" * (64 * 1024 + 1),
+        ):
+            with self.subTest(invalid=invalid[:80]), patch.object(u, "_open", return_value=io.BytesIO(invalid)):
+                with self.assertRaises(ValueError):
+                    u.catalog_revision()
 
     def test_released_firmware_catalog(self):
         folder = Path(__file__).resolve().parents[2]

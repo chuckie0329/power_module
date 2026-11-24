@@ -2,7 +2,7 @@ name: Windows PC client
 
 on:
   push:
-    branches: [main, ci/pc-v1.0.2, ship/pc-v1.0.2]
+    branches: [main, ci/pc-v1.0.3, ship/pc-v1.0.3]
   workflow_dispatch:
 
 permissions:
@@ -34,13 +34,13 @@ jobs:
         run: ./tools/smoke_pc_windows.ps1
       - name: Exercise self-update handoff on Windows
         run: ./tools/smoke_pc_upgrade_windows.ps1
-      - name: Validate the official v1.0.1 predecessor identity
+      - name: Validate the official v1.0.2 predecessor identity
         shell: pwsh
         run: |
           $old = Join-Path $env:RUNNER_TEMP 'PowerModule-PC.exe'
-          curl.exe -fsSL --retry 3 'https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.1/PowerModule-PC.exe' -o $old
-          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $old).Hash.ToLowerInvariant() -ne '2a245ea63063621f36f2d25f8094e47edf56164f09af2e0db46ab69ed7a19dbb') { throw 'Invalid predecessor checksum' }
-          python -c "from pathlib import Path; import sys; from pc_client.pc_upgrade import _predecessor; assert _predecessor(Path(sys.argv[1]), '1.0.1', '1.0.2')" $old
+          curl.exe -fsSL --retry 3 'https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.2/PowerModule-PC.exe' -o $old
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $old).Hash.ToLowerInvariant() -ne '5ec29e621dfb8f01a215b455183f0ebac10c06bb88ef434c9363e306f1fdff5e') { throw 'Invalid predecessor checksum' }
+          python -c "from pathlib import Path; import sys; from pc_client.pc_upgrade import _predecessor; assert _predecessor(Path(sys.argv[1]), '1.0.2', '1.0.3')" $old
           if ($LASTEXITCODE -ne 0) { throw 'Invalid old client identity' }
       - name: Retain verified executable
         uses: actions/upload-artifact@v4
@@ -50,7 +50,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.2'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.3'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -70,10 +70,10 @@ jobs:
           set -euo pipefail
           version="$(python3 -c 'from pc_client.version import PC_VERSION; print(PC_VERSION)')"
           tag="pc-v$version"
-          test "$tag" = pc-v1.0.2
+          test "$tag" = pc-v1.0.3
           test "ship/$tag" = "$GITHUB_REF_NAME"
           test "$GITHUB_SHA" = "$(git ls-remote origin refs/heads/main | cut -f1)"
           (cd dist; sha256sum PowerModule-PC.exe > SHA256SUMS.txt)
           gh release create "$tag" dist/PowerModule-PC.exe dist/SHA256SUMS.txt \
             --target "$GITHUB_SHA" --latest=false --title "PowerModule PC v$version" \
-            --notes "主窗口和悬浮窗的实时输出功率保留两位小数。新增 USB 清除设备端蓝牙配对按钮，需 ESP32 固件 v1.2.3；固件独立发布。"
+            --notes "修复「重新检查」可能读到 GitHub 旧缓存的问题，两份清单固定到同一个最新提交。ESP32 固件仍为 v1.2.3，本次仅发布客户端。"

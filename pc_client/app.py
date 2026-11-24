@@ -1239,4 +1239,27 @@ def main():
                 app.exit(result)
 
         QTimer.singleShot(0, verify_frozen_startup)
+    elif len(sys.argv) == 3 and sys.argv[1] == "--release-catalog-smoke":
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from pc_client.online_updates import cache_firmware, catalog_revision, check_catalog
+
+        def verify_frozen_catalog():
+            marker = Path(sys.argv[2])
+            result = 1
+            try:
+                revision = catalog_revision()
+                pc = check_catalog("pc", revision=revision)
+                firmware = check_catalog("firmware", revision=revision)
+                with TemporaryDirectory() as tmp:
+                    cache_firmware(firmware, tmp)
+                marker.write_text(f"{pc.version} {firmware.version}", encoding="ascii")
+                result = 0
+            except Exception as error:
+                marker.write_text(str(error), encoding="utf-8")
+            finally:
+                window.close()
+                app.exit(result)
+
+        QTimer.singleShot(0, verify_frozen_catalog)
     return app.exec()

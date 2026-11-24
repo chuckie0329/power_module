@@ -16,7 +16,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from pc_client.firmware_update import APP_SLOT_SIZE, FirmwareImage
 
 REPOSITORY = "chuckie0329/power_module"
-CATALOG = f"https://raw.githubusercontent.com/{REPOSITORY}/main/updates"
+CATALOG = f"https://raw.githubusercontent.com/{REPOSITORY}"
+GIT_REFS = f"https://github.com/{REPOSITORY}.git/info/refs?service=git-upload-pack"
 FIRMWARE_TARGET = "PowerModule-ESP32"
 PC_ASSET = "PowerModule-PC.exe"
 FIRMWARE_ASSET = "PowerModule-ESP32.bin"
@@ -106,16 +107,52 @@ class _Redirects(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _open(url, hosts):
+def _open(url, hosts, *, revalidate=False):
     if not _allowed(url, hosts):
         raise ValueError("更新地址不受支持。")
-    return build_opener(_Redirects(hosts)).open(
-        Request(url, headers={"User-Agent": "PowerModule-PC"}), timeout=TIMEOUT,
-    )
+    headers = {"User-Agent": "PowerModule-PC"}
+    if revalidate:
+        headers["Cache-Control"] = "no-cache"
+    return build_opener(_Redirects(set() if revalidate else hosts)).open(Request(url, headers=headers), timeout=TIMEOUT)
 
 
-def check_catalog(kind):
-    with _open(f"{CATALOG}/{kind}-stable.json", {"raw.githubusercontent.com"}) as source:
+def catalog_revision():
+    # Git's ref discovery endpoint tells intermediaries to revalidate, unlike
+    # the mutable /main/ raw URL. Both catalogs can use one immutable revision.
+    limit = 64 * 1024
+    with _open(GIT_REFS, {"github.com"}, revalidate=True) as source:
+        data = source.read(limit + 1)
+    service = b"001e# service=git-upload-pack\n0000"
+    if len(data) > limit or not data.startswith(service):
+        raise ValueError("无法验证更新清单引用。")
+    offset = len(service)
+    revision = None
+    while offset + 4 <= len(data):
+        length = data[offset:offset + 4]
+        if length == b"0000" and offset + 4 == len(data) and revision is not None:
+            return revision
+        if not re.fullmatch(rb"[0-9a-f]{4}", length):
+            break
+        size = int(length, 16)
+        if not 4 < size <= len(data) - offset:
+            break
+        packet = data[offset + 4:offset + size]
+        if packet.endswith(b" refs/heads/main\n"):
+            match = re.fullmatch(rb"([0-9a-f]{40}) refs/heads/main\n", packet)
+            if revision is not None or match is None or match[1] == b"0" * 40:
+                break
+            revision = match[1].decode("ascii")
+        offset += size
+    raise ValueError("无法验证更新清单引用。")
+
+
+def check_catalog(kind, *, revision=None):
+    if kind not in LIMITS:
+        raise ValueError("不支持的更新类型。")
+    revision = catalog_revision() if revision is None else revision
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("无效的更新清单版本。")
+    with _open(f"{CATALOG}/{revision}/updates/{kind}-stable.json", {"raw.githubusercontent.com"}) as source:
         content = source.read(MAX_CATALOG_BYTES + 1)
     if len(content) > MAX_CATALOG_BYTES:
         raise ValueError("更新清单过大。")

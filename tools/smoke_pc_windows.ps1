@@ -20,3 +20,16 @@ if ($process.ExitCode -ne 0 -or -not (Test-Path $marker) -or (Get-Content -Raw $
     if (Test-Path $marker) { Get-Content -Raw $marker }
     throw 'Frozen Windows client failed GUI startup, compact geometry, or BLE imports.'
 }
+
+$catalogMarker = (Join-Path (Get-Location).Path '.work/catalog-smoke.txt')
+Remove-Item -ErrorAction SilentlyContinue $catalogMarker
+$catalog = Start-Process $exe -ArgumentList ('--release-catalog-smoke "{0}"' -f $catalogMarker) -PassThru
+if (-not $catalog.WaitForExit(120000)) {
+    Stop-Process -Id $catalog.Id -Force -ErrorAction SilentlyContinue
+    throw 'Frozen Windows client timed out reading online update catalogs.'
+}
+if ($catalog.ExitCode -ne 0 -or -not (Test-Path $catalogMarker) -or (Get-Content -Raw $catalogMarker) -notmatch '^\d+\.\d+\.\d+ \d+\.\d+\.\d+$') {
+    if (Test-Path $catalogMarker) { Get-Content -Raw $catalogMarker }
+    throw 'Frozen Windows client failed to resolve both live catalogs or check the public firmware asset.'
+}
+Get-Content -Raw $catalogMarker
