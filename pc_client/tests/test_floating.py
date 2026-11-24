@@ -64,8 +64,9 @@ class FloatingTests(unittest.TestCase):
         for flag in (Qt.WindowType.FramelessWindowHint, Qt.WindowType.WindowStaysOnTopHint):
             self.assertTrue(panel.windowFlags() & flag)
         self.assertTrue(panel.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
-        # Offscreen's host window minimums vary; validate our requested content size.
-        self.assertLess(panel.minimumWidth(), 260)
+        widgets = (*[meter for meter, _ in panel.values.values()], panel.output, *panel.relays.values())
+        sizes = [(w.text(), w.width(), w.minimumWidth(), w.fontMetrics().height()) for w in widgets]
+        self.assertLess(panel.width(), 260, f"{QApplication.platformName()}: {sizes}")
         self.assertLess(panel.minimumHeight(), 90)
         self.assertEqual(panel.maximumSize(), panel.minimumSize())
         frame = panel.grab().toImage()
