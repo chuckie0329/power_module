@@ -1,5 +1,12 @@
 {
   "schema": 1,
   "kind": "pc",
-  "stable": null
+  "stable": {
+    "version": "1.0.0",
+    "target": "windows-x64",
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.0/PowerModule-PC.exe",
+    "sha256": "8493d27b8936acd6c450af9c0db01dcb082ef898076e4ffc3448fcc53a35e133",
+    "size": 38637557,
+    "notes": "半透明悬浮窗、托盘、原版图标及独立在线更新检查。此发布不包含 ESP32 固件。"
+  }
 }
