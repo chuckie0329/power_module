@@ -225,6 +225,12 @@ class Session:
             pass
 
 
+def verify_predecessor(expected_version):
+    old = _exe()
+    if not _predecessor(old, PC_VERSION, expected_version):
+        raise ValueError("无法确认旧客户端文件名或版本；改名的客户端请手动更新。")
+
+
 def launch(new_path, expected_sha256, expected_version, resume=None):
     """Verify again under a deny-write lock, then launch without shell indirection."""
     old = _exe()
@@ -245,8 +251,7 @@ def launch(new_path, expected_sha256, expected_version, resume=None):
         if (digest.hexdigest() != expected_sha256 or not _is_windows_x64_gui(new)
                 or _windows_file_version(new) != (*version_key(expected_version), 0)):
             raise ValueError("新版客户端已变更，无法启动。")
-        if not _predecessor(old, PC_VERSION, expected_version):
-            raise ValueError("旧客户端文件名或版本无法确认；改名的客户端请手动更新。")
+        verify_predecessor(expected_version)
         folder = Path(tempfile.mkdtemp(prefix="PowerModule-upgrade-")).resolve(strict=True)
         (folder / "request.json").write_text(json.dumps({
             "pid": os.getpid(), "old": str(old), "identity": _path_identity(old),
@@ -378,6 +383,21 @@ def smoke_startup(window, app):
         try:
             if not window.isVisible():
                 raise AssertionError("predecessor GUI not visible")
+            original_popen = subprocess.Popen
+
+            def never_start(*_args, **_kwargs):
+                raise AssertionError("wrong hash attempted to launch an executable")
+
+            try:
+                subprocess.Popen = never_start
+                try:
+                    launch(successor, "0" * 64, PC_VERSION)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("invalid hash was accepted")
+            finally:
+                subprocess.Popen = original_popen
             try:
                 session = launch(successor, sha256(successor.read_bytes()).hexdigest(), PC_VERSION)
             except (RuntimeError, TimeoutError) as error:

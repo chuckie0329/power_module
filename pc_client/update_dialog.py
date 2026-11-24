@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QPushButton
 
 from pc_client.online_updates import cache_firmware, check_catalog, download_client, version_key
-from pc_client.pc_upgrade import launch
+from pc_client.pc_upgrade import launch, verify_predecessor
 from pc_client.version import PC_VERSION
 
 
@@ -107,7 +107,11 @@ class UpdateDialog(QDialog):
             return
         update = self.updates["pc"]
         self.status.setText("下载并校验新版客户端，原客户端继续运行…")
-        self._busy("pc-download", lambda: download_client(update, self.directory))
+        def get_client():
+            verify_predecessor(update.version)
+            return download_client(update, self.directory)
+
+        self._busy("pc-download", get_client)
 
     def prepare_pc(self, new_path):
         update = self.updates["pc"]
