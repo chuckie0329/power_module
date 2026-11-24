@@ -2,12 +2,12 @@
   "schema": 1,
   "kind": "firmware",
   "stable": {
-    "version": "1.2.1",
+    "version": "1.2.2",
     "target": "PowerModule-ESP32",
     "protocol": 1,
-    "url": "https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.bin",
-    "sha256": "87969bfa936e66648b80a6191eddb5cf7bf52c8d7b957d78c0b652a48492f9a1",
-    "size": 660176,
-    "notes": "现有正式固件，不含单独测试的重连修复。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.2/PowerModule-ESP32.bin",
+    "sha256": "24590ba3c850828f4bdc454fc9af70fb59deeba88de1090b9e826ef8c6cfd2f7",
+    "size": 660208,
+    "notes": "修复输出开启时 USB 重连可能应答超时的问题。升级前关闭主输出和两路继电器。"
   }
 }
