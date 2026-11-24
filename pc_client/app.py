@@ -7,12 +7,14 @@ from PySide6.QtCore import QLocale, QSettings, QSignalBlocker, Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
+    QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 from pc_client.chart import HistoryPane
 from pc_client.connection import BleLink, LinkWorker, firmware_version, retains_outputs, usb_ports
 from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
+from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
 from pc_client.theme import STYLES, icon
 
@@ -144,6 +146,9 @@ class Window(QMainWindow):
         self.current_group = None
         self.output_requests_off = False
         self.output_dirty = self.protection_dirty = self.opp_dirty = False
+        self.floating = None
+        self.tray = None
+        self.hidden_chart_dialog = None
 
         page = QWidget()
         page.setObjectName("page")
@@ -170,7 +175,8 @@ class Window(QMainWindow):
         self.refresh_sampling_options()
         self.sampling.currentIndexChanged.connect(self.sampling_changed)
         self.period_ms = 500
-        chart_layout.addWidget(HistoryPane(self.history, sampling=self.sampling))
+        self.history_pane = HistoryPane(self.history, sampling=self.sampling)
+        chart_layout.addWidget(self.history_pane)
         columns.addWidget(chart_card, 1)
         content.addLayout(columns, 1)
         self.update_panel = QWidget()
@@ -227,6 +233,8 @@ class Window(QMainWindow):
         row.addWidget(self.connect_button)
         self.update_button = button("固件升级", self.start_firmware_update)
         row.addWidget(self.update_button)
+        self.float_button = button("悬浮", self.show_floating)
+        row.addWidget(self.float_button)
         header.addLayout(row)
         details = QHBoxLayout()
         self.link_badge = label("未连接", "pill")
@@ -237,6 +245,60 @@ class Window(QMainWindow):
         details.addWidget(self.output_badge)
         header.addLayout(details)
         return frame
+
+    def show_floating(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self.announce("系统托盘不可用，无法进入悬浮模式。", True)
+            return
+        if self.jobs & {"固件升级", "disconnect"} or self.exit_requested:
+            return
+        if self.floating is None:
+            self.floating = FloatingPanel()
+            self.floating.restore_requested.connect(self.restore_main)
+            self.floating.output_requested.connect(self.toggle_floating_output)
+            self.floating.relay_requested.connect(self.toggle_floating_relay)
+            self.tray = QSystemTrayIcon(self.windowIcon(), self)
+            self.tray.setToolTip("直流电源控制台")
+            self.tray_menu = QMenu(self)
+            self.tray_menu.addAction("恢复主窗口", self.restore_main)
+            self.tray.setContextMenu(self.tray_menu)
+            self.tray.activated.connect(self.tray_activated)
+        self.render()
+        self.tray.show()
+        self.floating.show_near(self)
+        dialog = self.history_pane.dialog
+        if dialog is not None and dialog.isVisible():
+            self.hidden_chart_dialog = dialog
+            dialog.hide()
+        self.hide()
+
+    def tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.restore_main()
+
+    def restore_main(self):
+        self.show()
+        if self.isMinimized():
+            self.showNormal()
+        if self.hidden_chart_dialog is not None:
+            if self.hidden_chart_dialog is self.history_pane.dialog:
+                self.hidden_chart_dialog.show()
+            self.hidden_chart_dialog = None
+        self.raise_()
+        self.activateWindow()
+        if self.floating is not None:
+            self.floating.hide()
+            self.tray.hide()
+
+    def toggle_floating_output(self):
+        self.render()
+        if self.floating.output.isEnabled():
+            self.toggle_output()
+
+    def toggle_floating_relay(self, channel):
+        self.render()
+        if self.floating.relays[channel].isEnabled():
+            self.toggle_relay(channel)
 
     def meters(self):
         row = QHBoxLayout()
@@ -373,6 +435,8 @@ class Window(QMainWindow):
     def announce(self, text, error=False):
         self.message.setText(text)
         dynamic(self.message, "level", "error" if error else "")
+        if error and self.floating is not None and self.floating.isVisible():
+            self.tray.showMessage("直流电源", text, QSystemTrayIcon.MessageIcon.Warning)
 
     def noticed(self, title, detail):
         self.announce(f"{title}。{error_text(detail)}", True)
@@ -744,6 +808,7 @@ class Window(QMainWindow):
         self.refresh.setEnabled(not connected and not link_pending)
         self.connect_button.setEnabled(not link_pending and (connected or self.target.count() > 0))
         self.connect_button.setText("断开" if connected else "连接")
+        self.float_button.setEnabled(not self.exit_requested and not self.jobs & {"固件升级", "disconnect"})
         supports_update = firmware_version(self.info) >= MIN_FIRMWARE_VERSION
         self.update_button.setEnabled(connected and supports_update and not busy)
         self.update_button.setToolTip("先用 COM3 安装 v1.2.0 或更新版本以启用升级。"
@@ -822,6 +887,21 @@ class Window(QMainWindow):
             dynamic(widget, "active", engaged is True)
             widget.setEnabled(normal_control and isinstance(engaged, bool))
 
+        if self.floating is not None:
+            self.floating.sync(
+                {key: widget.text() for key, widget in self.meter_values.items()},
+                None if "开启输出" in self.jobs else enabled, self.output_switch,
+                {channel: (widget, applied.get(f"relay{channel}")) for channel, widget in self.relay.items()},
+            )
+            if "固件升级" in self.jobs:
+                self.floating.output.setEnabled(False)
+                self.floating.output.setToolTip("固件升级时不允许控制输出。")
+                self.floating.output.setAccessibleDescription(self.floating.output.toolTip())
+            elif self.output_dirty and not self.output_requests_off:
+                self.floating.output.setEnabled(False)
+                self.floating.output.setToolTip("请恢复主窗口，先应用尚未提交的输出设定。")
+                self.floating.output.setAccessibleDescription(self.floating.output.toolTip())
+
         self.render_protection(settable, enabled, fresh)
 
     def render_meters(self, measured):
@@ -898,6 +978,9 @@ class Window(QMainWindow):
             if "disconnect" not in self.jobs:
                 self.toggle_connection()
             return
+        if self.floating is not None:
+            self.floating.hide()
+            self.tray.hide()
         self.worker.stop()
         event.accept()
 

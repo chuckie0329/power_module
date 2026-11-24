@@ -14,6 +14,12 @@
 
 使用 v1.1.5 及以上固件时，首次在 Windows 蓝牙设置中添加 `PM-xxxx`，输入固定 PIN **112233**。配对后，在客户端选择 **蓝牙 BLE**，扫描并连接设备。Windows 会保存配对记录供下次连接使用。 [ESP32 固件说明](../firmware/README.md)
 
+## 悬浮模式
+
+点击主界面顶部的「悬浮」进入半透明、置顶的小窗口。主窗口从任务栏收起，系统托盘显示电源图标。小窗口只显示实时输出电压、电流和功率，以及主输出和 K1、K2 开关；未读到有效数据时用「—」表示。开关显示的是确认或读回的状态，K1/K2 对应线圈命令而非物理触点反馈。拖动读数区域可移动窗口，双击读数区域或点击托盘图标可恢复主窗口。
+
+切换模式不会断开连接、改变采样配置或发送输出命令。悬浮模式不会使用主窗口中尚未应用的电压和限流设定来开启输出：请先回主窗口处理设定。固件 v1.2.1 起，断开连接不等于关断输出。
+
 ## 固件升级
 
 从 ESP32 固件 v1.2.0 起，可在客户端通过 COM4 或蓝牙升级。连接设备并关闭主输出和两路继电器，点击 **固件升级** 并选择应用镜像。客户端会显示传输进度，在校验完成并重启后自动重连，确认新镜像已启动。传输过程中可以点击 **取消升级**。 [应用镜像 BIN][firmware-bin]
@@ -76,7 +82,7 @@ $buildPython = (Get-Command python -CommandType Application).Source
 $originalPath = $env:Path
 try {
     $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
-    & $buildPython -m PyInstaller --noconfirm --onefile --windowed --name PowerModule-PC --paths . --workpath .work/pc-client-pyi-clean --specpath .work --distpath pc_client/build --hidden-import bleak.backends.winrt.client --hidden-import bleak.backends.winrt.scanner pc_client/__main__.py
+    & $buildPython -m PyInstaller --noconfirm --onefile --windowed --name PowerModule-PC --icon pc_client/assets/power_module.ico --paths . --workpath .work/pc-client-pyi-clean --specpath .work --distpath pc_client/build --hidden-import bleak.backends.winrt.client --hidden-import bleak.backends.winrt.scanner pc_client/__main__.py
 } finally {
     $env:Path = $originalPath
 }
