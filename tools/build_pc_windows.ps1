@@ -7,10 +7,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows x64 Python 3.12 is required.' }
 New-Item -ItemType Directory -Force '.work' | Out-Null
 & $buildPython tools/write_pc_version.py '.work/pc-version-resource.txt'
 if ($LASTEXITCODE -ne 0) { throw 'Could not generate the Windows version resource.' }
+$icon = (Resolve-Path 'pc_client/assets/power_module.ico').Path
+$versionResource = (Resolve-Path '.work/pc-version-resource.txt').Path
 $originalPath = $env:Path
 try {
     $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
-    & $buildPython -m PyInstaller --noconfirm --onefile --windowed --name PowerModule-PC --icon pc_client/assets/power_module.ico --version-file .work/pc-version-resource.txt --paths . --workpath .work/pc-client-pyi-clean --specpath .work --distpath pc_client/build --hidden-import bleak.backends.winrt.client --hidden-import bleak.backends.winrt.scanner pc_client/__main__.py
+    & $buildPython -m PyInstaller --noconfirm --onefile --windowed --name PowerModule-PC --icon $icon --version-file $versionResource --paths . --workpath .work/pc-client-pyi-clean --specpath .work --distpath pc_client/build --hidden-import bleak.backends.winrt.client --hidden-import bleak.backends.winrt.scanner pc_client/__main__.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 } finally {
     $env:Path = $originalPath
