@@ -1,6 +1,7 @@
 import asyncio
 from base64 import b64encode
 import secrets
+import sys
 import struct
 import threading
 import time
@@ -82,6 +83,61 @@ class SerialLink:
         self.port.close()
 
 
+async def pair_windows_device(target):
+    # Bleak 2.1.1's pair=True only implements the WinRT ConfirmOnly
+    # ceremony. Basic pairing lets Windows handle the firmware's PIN.
+    from winrt.windows.devices.bluetooth import BluetoothAddressType, BluetoothLEDevice
+    from winrt.windows.devices.enumeration import (
+        DeviceInformation, DevicePairingProtectionLevel, DevicePairingResultStatus,
+    )
+
+    details = getattr(target, "details", None)
+    advertisement = getattr(details, "adv", None) or getattr(details, "scan", None)
+    address = getattr(advertisement, "bluetooth_address", None)
+    if address is None:
+        raise DeviceError("BLE_RESCAN")
+    address_type = getattr(advertisement, "bluetooth_address_type", None)
+    device = operation = None
+    try:
+        async with asyncio.timeout(50):
+            if address_type in (BluetoothAddressType.PUBLIC, BluetoothAddressType.RANDOM):
+                device = await BluetoothLEDevice.from_bluetooth_address_with_bluetooth_address_type_async(
+                    address, address_type)
+            else:
+                device = await BluetoothLEDevice.from_bluetooth_address_async(address)
+            if device is None:
+                raise DeviceError("BLE_RESCAN")
+            info = await DeviceInformation.create_from_id_async(device.device_information.id)
+            pairing = info.pairing
+            if pairing.is_paired:
+                return
+            level = DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION
+            operation = pairing.pair_with_protection_level_async(level)
+            result = await operation
+            status = result.status
+            if status == DevicePairingResultStatus.ALREADY_PAIRED:
+                return
+            if status == DevicePairingResultStatus.PAIRED and result.protection_level_used == level:
+                return
+            if status == DevicePairingResultStatus.PAIRING_CANCELED:
+                raise DeviceError("BLE_PAIR_CANCELLED")
+            raise DeviceError("BLE_PAIR_FAILED")
+    except (TimeoutError, asyncio.CancelledError) as error:
+        if operation is not None:
+            try:
+                operation.cancel()
+            except OSError:
+                pass  # The Windows operation may already have completed.
+        if isinstance(error, TimeoutError):
+            raise DeviceError("BLE_PAIR_TIMEOUT") from error
+        raise
+    except OSError as error:
+        raise DeviceError("BLE_PAIR_FAILED") from error
+    finally:
+        if device is not None:
+            device.close()
+
+
 class BleLink:
     name = "ble"
     timeout = 12.0
@@ -91,6 +147,7 @@ class BleLink:
         self.client = None
         self.lock = asyncio.Lock()
         self.number = 0
+        self.allow_pairing = False
 
     @staticmethod
     async def scan():
@@ -101,6 +158,8 @@ class BleLink:
         ]
 
     async def open(self, received, disconnected):
+        if self.allow_pairing and sys.platform == "win32":
+            await pair_windows_device(self.target)
         # WinRT's UUID-filtered discovery can fail with ERROR_BAD_COMMAND.
         self.client = BleakClient(
             self.target, timeout=15,
@@ -148,13 +207,15 @@ class Client:
         self.closing = False
         self.updating = False
 
-    async def connect(self, mode, target, expected_device=None):
+    async def connect(self, mode, target, expected_device=None, *, allow_pairing=False):
         if self.link:
             raise DeviceError("BUSY")
         self.latest = {}
         self.info = {}
         self.client_id = secrets.randbits(32) or 1
         link = SerialLink(target) if mode == "usb" else BleLink(target)
+        if mode == "ble" and allow_pairing and expected_device is None:
+            link.allow_pairing = True
         try:
             try:
                 info = await self.identify(link)
@@ -183,6 +244,9 @@ class Client:
             if info.get("direct_control") and not retains_outputs(info):
                 self.heartbeat = asyncio.create_task(self.keep_alive(link))
             self.worker.connected.emit(info, self.latest)
+        except asyncio.CancelledError:
+            await self.close(graceful=False)
+            raise
         except Exception as error:
             await self.close(graceful=False)
             if mode == "ble" and isinstance(error, BleakError) and (

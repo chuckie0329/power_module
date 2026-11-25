@@ -50,6 +50,10 @@ ERRORS = {
     "BAD_VERSION": "该端口返回了不兼容的协议。",
     "INITIALIZING": "等待 SX150C 完成状态同步。",
     "LINK_ERROR": "设备连接已失效。",
+    "BLE_RESCAN": "找不到已选蓝牙设备，请重新扫描并选择设备。",
+    "BLE_PAIR_CANCELLED": "已取消蓝牙配对。再次点击连接可重试。",
+    "BLE_PAIR_TIMEOUT": "等待 Windows 蓝牙配对超时。请再次连接并查看系统配对提示。",
+    "BLE_PAIR_FAILED": "Windows 未能完成带认证的蓝牙配对。可在「蓝牙和设备」中手动配对后重试（PIN 112233）。",
     "BLE_AUTH_REQUIRED": "蓝牙认证失败。请在 Windows「蓝牙和其他设备」中配对电源，输入 PIN 112233 后重新连接。",
     "FIRMWARE_UPDATE": "当前固件可读取状态，更新至 v1.1.0 后可直接控制。",
     "BAD_STREAM_PERIOD": "设备不支持这个采样频率。",
@@ -499,8 +503,12 @@ class Window(QMainWindow):
             self.launch("disconnect", self.worker.client.close())
         elif self.target.currentData() is not None:
             self.connect_target = self.target.currentData()
-            self.announce("正在读取设备信息…")
-            self.launch("connect", self.worker.client.connect(self.kind, self.connect_target))
+            if self.kind == "ble":
+                self.announce("正在连接蓝牙。如 Windows 提示配对，请确认所选设备并输入 PIN 112233。")
+                self.launch("connect", self.worker.client.connect(self.kind, self.connect_target, allow_pairing=True))
+            else:
+                self.announce("正在读取设备信息…")
+                self.launch("connect", self.worker.client.connect(self.kind, self.connect_target))
 
     def check_updates(self):
         if self.update_dialog is None:
