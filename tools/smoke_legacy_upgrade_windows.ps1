@@ -70,8 +70,11 @@ raise SystemExit(app.main())
         $previous = Join-Path $location $previousName
         $canonical = Join-Path $location 'PowerModule-PC.exe'
         $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut((Join-Path $location 'PowerModule.lnk'))
+        $shortcutPath = Join-Path $location 'PowerModule.lnk'
+        $marker = Join-Path $location 'canonical-gui.txt'
+        $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $canonical
+        $shortcut.Arguments = '--release-smoke-test "{0}"' -f $marker
         $shortcut.Save()
         Copy-Item -LiteralPath $oldBuilt -Destination $previous
         $proc = Start-Process $previous -PassThru
@@ -87,14 +90,16 @@ raise SystemExit(app.main())
                 Start-Sleep -Milliseconds 200
             }
             if (-not $found) { throw "Legacy migration did not restore canonical path from $previousName." }
-            if ($shell.CreateShortcut((Join-Path $location 'PowerModule.lnk')).TargetPath -ne $canonical) {
+            if ($shell.CreateShortcut($shortcutPath).TargetPath -ne $canonical) {
                 throw 'Desktop shortcut target changed.'
             }
-            $marker = Join-Path $location 'canonical-gui.txt'
-            $launched = Start-Process $canonical -ArgumentList ('--release-smoke-test "{0}"' -f $marker) -PassThru
-            if (-not $launched.WaitForExit(45000) -or $launched.ExitCode -ne 0 -or
-                -not (Test-Path -LiteralPath $marker) -or (Get-Content -Raw $marker) -ne '1.0.4') {
-                throw "Restored shortcut target does not launch new GUI for $previousName."
+            Start-Process -FilePath $shortcutPath
+            $launchDeadline = [DateTime]::UtcNow.AddSeconds(45)
+            while (-not (Test-Path -LiteralPath $marker) -and [DateTime]::UtcNow -lt $launchDeadline) {
+                Start-Sleep -Milliseconds 150
+            }
+            if (-not (Test-Path -LiteralPath $marker) -or (Get-Content -Raw $marker) -ne '1.0.4') {
+                throw "Restored shortcut does not launch new GUI for $previousName."
             }
             Write-Output "Canonical shortcut verified for $previousName"
         } finally {
