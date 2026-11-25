@@ -16,7 +16,7 @@ from pc_client.connection import BleLink, LinkWorker, firmware_version, retains_
 from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
 from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
-from pc_client.pc_upgrade import pending_handoff, smoke_handoff, smoke_startup
+from pc_client.pc_upgrade import pending_handoff, run_upgrade_worker, smoke_handoff, smoke_startup
 from pc_client.theme import STYLES, icon
 from pc_client.update_dialog import UpdateDialog
 from pc_client.version import PC_VERSION
@@ -1168,6 +1168,9 @@ class Window(QMainWindow):
 
 
 def main():
+    worker_exit = run_upgrade_worker()
+    if worker_exit is not None:
+        return worker_exit
     app = QApplication(sys.argv)
     app.setApplicationName("直流电源控制台")
     app.setApplicationVersion(PC_VERSION)
@@ -1204,8 +1207,13 @@ def main():
                 return
             window.pc_handoff = False
             window.setEnabled(True)
-            window.announce("新版已启动，但未能移除旧客户端；旧文件已保留。" if state == "cleanup-failed"
-                            else "客户端升级完成。", state == "cleanup-failed")
+            if state == "complete" and handoff.legacy:
+                window.announce("已恢复 PowerModule-PC.exe。下次请从原快捷方式启动。")
+            elif handoff.recovery:
+                window.announce("升级未能完成，已恢复可运行的客户端。", True)
+            else:
+                window.announce("新版已启动，但未能清理旧版文件；原文件已保留。" if state == "cleanup-failed"
+                                else "客户端升级完成。", state == "cleanup-failed")
             window.render()
 
         def ready(error):

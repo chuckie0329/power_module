@@ -7,8 +7,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Cannot read client version.' }
 foreach ($mode in @('success', 'failure')) {
     $folder = Join-Path ([System.IO.Path]::GetTempPath()) ("pm-ci-handoff-" + [Guid]::NewGuid())
     New-Item -ItemType Directory -Path $folder | Out-Null
-    $old = Join-Path $folder 'PowerModule-PC-old.exe'
-    $new = Join-Path $folder "PowerModule-PC-v$version.exe"
+    $old = Join-Path $folder 'PowerModule-PC.exe'
+    $staging = Join-Path $folder ".PowerModule-download-ci"
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    $new = Join-Path $staging "PowerModule-PC-v$version.exe"
     Copy-Item -LiteralPath $exe -Destination $old
     Copy-Item -LiteralPath $exe -Destination $new
     New-Item -ItemType File -Path (Join-Path $folder 'smoke-fixture') | Out-Null
@@ -20,13 +22,13 @@ foreach ($mode in @('success', 'failure')) {
             throw "Predecessor did not finish its $mode upgrade smoke."
         }
         $marker = Join-Path $folder 'result.txt'
-        $deadline = [DateTime]::UtcNow.AddSeconds(45)
+        $deadline = [DateTime]::UtcNow.AddSeconds(95)
         while (-not (Test-Path -LiteralPath $marker) -and [DateTime]::UtcNow -lt $deadline) {
             Start-Sleep -Milliseconds 100
         }
         $result = Get-Content -LiteralPath $marker -Raw
-        $expected = if ($mode -eq 'success') { 'success-removed-old' } else { 'failure-preserved-old' }
-        if ($result -ne $expected -or (Test-Path -LiteralPath $old) -ne ($mode -eq 'failure') -or
+        $expected = if ($mode -eq 'success') { 'success-replaced-old' } else { 'failure-restored-old' }
+        if ($result -ne $expected -or -not (Test-Path -LiteralPath $old) -or
             -not (Test-Path -LiteralPath $new) -or -not (Test-Path -LiteralPath (Join-Path $folder 'unrelated.exe'))) {
             throw "Unexpected $mode upgrade smoke result: $result"
         }

@@ -1,6 +1,8 @@
 """One non-modal upgrade entry; firmware install always remains explicit."""
+from hashlib import file_digest
 from pathlib import Path
 import sys
+from tempfile import mkdtemp
 from threading import Thread
 
 from PySide6.QtCore import Qt, Signal, Slot
@@ -9,6 +11,23 @@ from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QPushButton
 from pc_client.online_updates import cache_firmware, catalog_revision, check_catalog, download_client, version_key
 from pc_client.pc_upgrade import launch, verify_predecessor
 from pc_client.version import PC_VERSION
+
+
+def discard_staged_client(path, update):
+    """Only remove the expected file in the private staging folder."""
+    try:
+        if (not path.parent.name.startswith(".PowerModule-download-")
+                or path.parent.resolve(strict=True) != path.parent):
+            return
+        if (path.name == update.filename and not path.is_symlink()
+                and path.stat().st_size == update.size):
+            with path.open("rb") as asset:
+                correct = file_digest(asset, "sha256").hexdigest() == update.sha256
+            if correct:
+                path.unlink()
+        path.parent.rmdir()
+    except OSError:
+        pass
 
 
 class UpdateDialog(QDialog):
@@ -113,7 +132,15 @@ class UpdateDialog(QDialog):
         self.status.setText("下载并校验新版客户端，原客户端继续运行…")
         def get_client():
             verify_predecessor(update.version)
-            return download_client(update, self.directory)
+            staging = Path(mkdtemp(prefix=".PowerModule-download-", dir=self.directory))
+            try:
+                return download_client(update, staging)
+            except BaseException:
+                try:
+                    staging.rmdir()
+                except OSError:
+                    pass
+                raise
 
         self._busy("pc-download", get_client)
 
@@ -125,10 +152,18 @@ class UpdateDialog(QDialog):
 
         def disconnected(resume, error):
             if error:
+                Thread(target=discard_staged_client, args=(new_path, update), daemon=True).start()
                 self.recover_pc(error)
                 return
-            self.status.setText("正在启动新版。如原先已连接，将验证并重连同一台设备…")
-            self._busy("pc-launch", lambda: launch(new_path, update.sha256, update.version, resume=resume))
+            self.status.setText("正在交接更新。新版将从原来的 PowerModule-PC.exe 路径启动…")
+
+            def hand_off():
+                try:
+                    return launch(new_path, update.sha256, update.version, resume=resume)
+                finally:
+                    discard_staged_client(new_path, update)
+
+            self._busy("pc-launch", hand_off)
 
         self.parent().prepare_pc_switch(disconnected)
 
@@ -195,7 +230,7 @@ class UpdateDialog(QDialog):
         elif operation == "check":
             self.checked = result
             self._render()
-            self.status.setText("升级客户端会打开新版；固件只有点「升级」并确认才会安装。")
+            self.status.setText("客户端升级保留原文件名和快捷方式；固件只有点「升级」并确认才会安装。")
             if self.directory and self.updates["firmware"]:
                 self.fetch_firmware()
                 return
