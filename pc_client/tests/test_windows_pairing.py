@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from pc_client.connection import BleLink, Client, DeviceError, PairingPinRequired, pair_windows_device
-from pc_client.protocol import RESPONSE, STATE
+from pc_client.connection import BleLink, Client, DeviceError, pair_windows_device
+from pc_client.protocol import RESPONSE, SERVICE, STATE
 
 
 class Address(IntEnum):
@@ -51,9 +51,10 @@ class PairOperation:
 class PairingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.selected = SimpleNamespace(details=SimpleNamespace(
-            adv=SimpleNamespace(bluetooth_address=0x010203040506, bluetooth_address_type=Address.RANDOM)))
+            adv=SimpleNamespace(bluetooth_address=0x010203040506, bluetooth_address_type=Address.RANDOM,
+                                advertisement=SimpleNamespace(service_uuids=[SERVICE]))))
         self.device = SimpleNamespace(device_information=SimpleNamespace(id="selected-device"), close=Mock())
-        self.pairing = SimpleNamespace(is_paired=False, pair_with_protection_level_async=Mock())
+        self.pairing = SimpleNamespace(is_paired=False, pair_with_protection_level_async=Mock(), custom=Mock())
         self.enum = SimpleNamespace(create_from_id_async=AsyncMock(return_value=SimpleNamespace(pairing=self.pairing)))
         self.factory = SimpleNamespace(from_bluetooth_address_with_bluetooth_address_type_async=AsyncMock(
             return_value=self.device), from_bluetooth_address_async=AsyncMock(return_value=self.device))
@@ -74,22 +75,29 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         self.pairing.pair_with_protection_level_async.assert_not_called()
         self.device.close.assert_called_once()
 
+    async def test_unrelated_advertisement_is_never_paired(self):
+        self.selected.details.adv.advertisement.service_uuids = ["0xA000"]
+        with self.assertRaisesRegex(DeviceError, "BLE_RESCAN"):
+            await pair_windows_device(self.selected)
+        self.enum.create_from_id_async.assert_not_awaited()
+        self.pairing.custom.pair_with_protection_level_async.assert_not_called()
+
     async def test_unpaired_waits_for_explicit_authenticated_result(self):
         operation = PairOperation(SimpleNamespace(status=Result.PAIRED,
             protection_level_used=Protection.ENCRYPTION_AND_AUTHENTICATION), delay=.02)
-        self.pairing.pair_with_protection_level_async.return_value = operation
+        self.pairing.custom.pair_with_protection_level_async.return_value = operation
         task = asyncio.create_task(pair_windows_device(self.selected))
         await asyncio.sleep(0)
         self.assertFalse(task.done())
         await task
-        self.pairing.pair_with_protection_level_async.assert_called_once_with(Protection.ENCRYPTION_AND_AUTHENTICATION)
+        self.pairing.custom.pair_with_protection_level_async.assert_called_once_with(PairKind.PROVIDE_PIN, Protection.ENCRYPTION_AND_AUTHENTICATION)
         self.device.close.assert_called_once()
 
     async def test_cancellation_refusal_and_downgraded_result(self):
         for status, error in ((Result.PAIRING_CANCELED, "BLE_PAIR_CANCELLED"),
                               (Result.FAILED, "BLE_PAIR_FAILED"), (Result.PAIRED, "BLE_PAIR_FAILED")):
             with self.subTest(status=status):
-                self.pairing.pair_with_protection_level_async.return_value = PairOperation(
+                self.pairing.custom.pair_with_protection_level_async.return_value = PairOperation(
                     SimpleNamespace(status=status, protection_level_used=Protection.ENCRYPTION))
                 with self.assertRaisesRegex(DeviceError, error):
                     await pair_windows_device(self.selected)
@@ -97,11 +105,11 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
     async def test_winrt_specific_status_and_protection_are_preserved(self):
         for status in (Result.AUTHENTICATION_FAILURE, Result.REQUIRED_HANDLER_NOT_REGISTERED,
                        Result.REMOTE_DEVICE_HAS_ASSOCIATION):
-            self.pairing.pair_with_protection_level_async.return_value = PairOperation(
+            self.pairing.custom.pair_with_protection_level_async.return_value = PairOperation(
                 SimpleNamespace(status=status, protection_level_used=Protection.ENCRYPTION))
             with self.assertRaises(DeviceError) as exc:
                 await pair_windows_device(self.selected)
-            prefix = "BLE_PAIR_PIN_REQUIRED" if status is Result.REQUIRED_HANDLER_NOT_REGISTERED else "BLE_PAIR_FAILED"
+            prefix = "BLE_PAIR_FAILED"
             self.assertEqual(str(exc.exception), f"{prefix}:{status.name}/ENCRYPTION")
 
     async def test_hresult_stage_only_does_not_expose_windows_exception_text(self):
@@ -125,16 +133,16 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
             handler(None, provide)
             return PairOperation(SimpleNamespace(status=Result.PAIRED, protection_level_used=level))
         custom.pair_with_protection_level_async.side_effect = pair
-        await pair_windows_device(self.selected, pin="654321")
+        await pair_windows_device(self.selected)
         confirm.accept_with_pin.assert_not_called()
-        provide.accept_with_pin.assert_called_once_with("654321")
+        provide.accept_with_pin.assert_called_once_with("112233")
         custom.remove_pairing_requested.assert_called_once_with(token)
         self.pairing.pair_with_protection_level_async.assert_not_called()
 
     async def test_timeout_cancels_the_windows_operation(self):
         operation = PairOperation(delay=60)
         real_timeout = asyncio.timeout
-        self.pairing.pair_with_protection_level_async.return_value = operation
+        self.pairing.custom.pair_with_protection_level_async.return_value = operation
         with patch("pc_client.connection.asyncio.timeout", side_effect=lambda _seconds: real_timeout(.03)) as timeout:
             with self.assertRaisesRegex(DeviceError, "BLE_PAIR_TIMEOUT"):
                 await pair_windows_device(self.selected)
@@ -172,26 +180,6 @@ class LinkPairingTests(unittest.IsolatedAsyncioTestCase):
                 await link.open(Mock(), Mock())
         factory.assert_not_called()
 
-    async def test_custom_pin_requires_local_challenge_for_exact_same_selected_object(self):
-        client = Client(Mock())
-        original, other = object(), object()
-        link = SimpleNamespace(allow_pairing=False)
-        detail = "BLE_PAIR_PIN_REQUIRED:REQUIRED_HANDLER_NOT_REGISTERED/ENCRYPTION"
-        with patch("pc_client.connection.BleLink", return_value=link):
-            with patch.object(client, "identify", AsyncMock(side_effect=DeviceError(detail))):
-                with self.assertRaisesRegex(DeviceError, "LINK_ERROR"):
-                    await client.connect("ble", original, allow_pairing=True)
-            with self.assertRaisesRegex(DeviceError, "BLE_PAIR_FAILED"):
-                await client.connect("ble", original, allow_pairing=True, pairing_pin="654321")
-            challenge = PairingPinRequired("BLE_PAIR_PIN_REQUIRED", "REQUIRED_HANDLER_NOT_REGISTERED/ENCRYPTION")
-            with patch.object(client, "identify", AsyncMock(side_effect=challenge)):
-                with self.assertRaises(PairingPinRequired):
-                    await client.connect("ble", original, allow_pairing=True)
-            with self.assertRaisesRegex(DeviceError, "BLE_PAIR_FAILED"):
-                await client.connect("ble", other, allow_pairing=True, pairing_pin="654321")
-            with self.assertRaisesRegex(DeviceError, "BLE_PAIR_FAILED"):
-                await client.connect("ble", original, allow_pairing=True, pairing_pin="654321")
-
     async def test_expected_identity_restore_and_usb_cannot_opt_in(self):
         for mode, expected, want_pair in (("ble", "same-device", False), ("ble", None, True),
                                            ("usb", None, False)):
@@ -214,28 +202,6 @@ class ManualWindowTests(unittest.TestCase):
         self.assertIn("REQUIRED_HANDLER_NOT_REGISTERED", text)
         self.assertIn("未能处理需要的配对操作", text)
         self.assertNotIn("私人值", error_text("BLE_PAIR_FAILED:私人值"))
-
-    def test_pin_dialog_requires_opt_in_and_rechecks_selected_device(self):
-        from pc_client.app import Window
-        target = object()
-        connect = Mock()
-        dropdown = Mock()
-        dropdown.currentData.return_value = target
-        window = SimpleNamespace(kind="ble", connect_target=target, target=dropdown,
-            info={}, jobs=set(), pc_handoff=False, exit_requested=False, launch=Mock(),
-            announce=Mock(), worker=SimpleNamespace(client=SimpleNamespace(connect=connect)))
-        for returned in (("", False), ("badpin", True)):
-            with patch("pc_client.app.QInputDialog.getText", return_value=returned):
-                Window.offer_explicit_ble_pin(window)
-        connect.assert_not_called()
-        dropdown.currentData.return_value = object()
-        with patch("pc_client.app.QInputDialog.getText", return_value=("654321", True)):
-            Window.offer_explicit_ble_pin(window)
-        connect.assert_not_called()
-        dropdown.currentData.return_value = target
-        with patch("pc_client.app.QInputDialog.getText", return_value=("654321", True)):
-            Window.offer_explicit_ble_pin(window)
-        connect.assert_called_once_with("ble", target, allow_pairing=True, pairing_pin="654321")
 
     def test_button_requests_pairing_only_for_ble(self):
         from pc_client.app import Window

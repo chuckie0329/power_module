@@ -52,8 +52,6 @@ ERRORS = {
     "INITIALIZING": "等待 SX150C 完成状态同步。",
     "LINK_ERROR": "设备连接已失效。",
     "BLE_RESCAN": "找不到已选蓝牙设备，请重新扫描并选择设备。",
-    "BLE_PAIR_PIN_REQUIRED": "Windows 需要应用提供 PIN。可选择手动输入 PIN 或先在 Windows 设置中配对。",
-    "BLE_PAIR_BAD_PIN": "请输入设备的六位数字 PIN。",
     "BLE_PAIR_CANCELLED": "已取消蓝牙配对。再次点击连接可重试。",
     "BLE_PAIR_TIMEOUT": "等待 Windows 蓝牙配对超时。请再次连接并查看系统配对提示。",
     "BLE_PAIR_FAILED": "Windows 未能完成带认证的蓝牙配对。可在「蓝牙和设备」中手动配对后重试（PIN 112233）。",
@@ -88,7 +86,7 @@ def error_text(value):
     if not isinstance(value, str):
         return value
     code, sep, detail = value.partition(":")
-    if sep and code in {"BLE_PAIR_FAILED", "BLE_PAIR_TIMEOUT", "BLE_PAIR_CANCELLED", "BLE_PAIR_PIN_REQUIRED"}:
+    if sep and code in {"BLE_PAIR_FAILED", "BLE_PAIR_TIMEOUT", "BLE_PAIR_CANCELLED"}:
         if not re.fullmatch(r"[A-Z][A-Z_0-9]{0,47}(?:/(?:[A-Z][A-Z_0-9]{0,47}|0x[0-9A-F]{8}))?", detail):
             return ERRORS[code]
         status = detail.split("/", 1)[0]
@@ -98,8 +96,7 @@ def error_text(value):
             "AUTHENTICATION_TIMEOUT": "Windows 的认证超时。请重新连接，并在出现系统提示时及时完成配对。",
             "AUTHENTICATION_NOT_ALLOWED": "Windows 或设备不支持这次认证方式。请在 Windows 设置中先手动配对。",
             "PROTECTION_LEVEL_COULD_NOT_BE_MET": "这次配对未达到加密和认证要求。请在 Windows 设置中先手动配对。",
-            "REQUIRED_HANDLER_NOT_REGISTERED": ERRORS[code] if code == "BLE_PAIR_PIN_REQUIRED" else
-                                               "Windows 未能处理需要的配对操作。请在 Windows 设置中先手动配对。",
+            "REQUIRED_HANDLER_NOT_REGISTERED": "Windows 未能处理需要的配对操作。请在 Windows 设置中先手动配对。",
             "REMOTE_DEVICE_HAS_ASSOCIATION": "设备已有配对关联。请先断开其他电脑，并检查双方的旧配对记录。",
             "ACCESS_DENIED": "Windows 拒绝应用请求配对。请检查蓝牙权限，或在 Windows 设置中先手动配对。",
         }.get(status, ERRORS[code])
@@ -526,32 +523,11 @@ class Window(QMainWindow):
         elif self.target.currentData() is not None:
             self.connect_target = self.target.currentData()
             if self.kind == "ble":
-                self.announce("正在连接蓝牙。如 Windows 提示配对，请确认所选设备并输入 PIN 112233。")
+                self.announce("正在连接蓝牙。若尚未配对，客户端将请求安全配对；如 Windows 要求确认，请核对设备。")
                 self.launch("connect", self.worker.client.connect(self.kind, self.connect_target, allow_pairing=True))
             else:
                 self.announce("正在读取设备信息…")
                 self.launch("connect", self.worker.client.connect(self.kind, self.connect_target))
-
-    def offer_explicit_ble_pin(self):
-        target = self.connect_target
-        if self.kind != "ble" or target is None or self.info or self.jobs or self.pc_handoff or self.exit_requested:
-            return
-        # No default PIN is accepted or forwarded. The user must supply it.
-        pin, accepted = QInputDialog.getText(
-            self, "输入设备 PIN", "Windows 需要应用提供 PIN。请确认所选设备，再输入其六位 PIN。"
-            "取消则不配对，也可在 Windows 设置中手动配对。",
-            QLineEdit.EchoMode.Password,
-        )
-        if not accepted:
-            return
-        if not re.fullmatch(r"[0-9]{6}", pin):
-            self.announce(ERRORS["BLE_PAIR_BAD_PIN"], True)
-            return
-        if (self.kind != "ble" or target is not self.connect_target or self.target.currentData() is not target
-                or self.info or self.jobs or self.pc_handoff or self.exit_requested):
-            return
-        self.announce("正在请求 Windows 进行带认证的蓝牙配对…")
-        self.launch("connect", self.worker.client.connect(self.kind, target, allow_pairing=True, pairing_pin=pin))
 
     def check_updates(self):
         if self.update_dialog is None:
@@ -858,8 +834,6 @@ class Window(QMainWindow):
                 self.period_ms = self.sampling.currentData()
         if error:
             self.announce(error_text(error), error != "REARM_REQUIRED")
-            if action == "connect" and error.startswith("BLE_PAIR_PIN_REQUIRED:REQUIRED_HANDLER_NOT_REGISTERED/"):
-                self.offer_explicit_ble_pin()
         elif action in ("应用设定", "开启输出", "关闭输出"):
             if action != "关闭输出":
                 self.output_dirty = False
