@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.3",
+    "version": "1.0.4",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.3/PowerModule-PC.exe",
-    "sha256": "6307ff9df05b91204fb5cff4da75e59a2b6b62d42b60342a166fa2785ca82974",
-    "size": 38663508,
-    "notes": "修复「重新检查」可能读到 GitHub 旧缓存的问题。ESP32 固件仍为 v1.2.3。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.4/PowerModule-PC.exe",
+    "sha256": "9061381c221d1dbe0e1626ef5ff3f0a919612e1c3ff94c1c74e6d1461f0504e3",
+    "size": 38677817,
+    "notes": "升级保留 PowerModule-PC.exe 路径与桌面快捷方式。新增手动连接时的 Windows 蓝牙配对。固件不变。"
   }
 }
