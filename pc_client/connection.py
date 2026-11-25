@@ -1,5 +1,6 @@
 import asyncio
 from base64 import b64encode
+import re
 import secrets
 import sys
 import struct
@@ -38,9 +39,20 @@ def retains_outputs(info):
 
 
 class DeviceError(Exception):
-    def __init__(self, code):
-        super().__init__(code)
+    def __init__(self, code, detail=None):
+        super().__init__(f"{code}:{detail}" if detail else code)
         self.code = code
+
+
+class PairingPinRequired(DeviceError):
+    pass
+
+
+def _winrt_enum(value):
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and re.fullmatch(r"[A-Z][A-Z_0-9]{0,47}", name):
+        return name
+    return "UNKNOWN"
 
 
 class SerialLink:
@@ -83,13 +95,15 @@ class SerialLink:
         self.port.close()
 
 
-async def pair_windows_device(target):
+async def pair_windows_device(target, *, pin=None):
     # Bleak 2.1.1's pair=True only implements the WinRT ConfirmOnly
     # ceremony. Basic pairing lets Windows handle the firmware's PIN.
     from winrt.windows.devices.bluetooth import BluetoothAddressType, BluetoothLEDevice
     from winrt.windows.devices.enumeration import (
         DeviceInformation, DevicePairingProtectionLevel, DevicePairingResultStatus,
     )
+    if pin is not None and (not isinstance(pin, str) or not re.fullmatch(r"[0-9]{6}", pin)):
+        raise DeviceError("BLE_PAIR_BAD_PIN")
 
     details = getattr(target, "details", None)
     advertisement = getattr(details, "adv", None) or getattr(details, "scan", None)
@@ -97,7 +111,8 @@ async def pair_windows_device(target):
     if address is None:
         raise DeviceError("BLE_RESCAN")
     address_type = getattr(advertisement, "bluetooth_address_type", None)
-    device = operation = None
+    device = operation = custom = token = None
+    stage = "DEVICE"
     try:
         async with asyncio.timeout(50):
             if address_type in (BluetoothAddressType.PUBLIC, BluetoothAddressType.RANDOM):
@@ -107,21 +122,38 @@ async def pair_windows_device(target):
                 device = await BluetoothLEDevice.from_bluetooth_address_async(address)
             if device is None:
                 raise DeviceError("BLE_RESCAN")
+            stage = "INFORMATION"
             info = await DeviceInformation.create_from_id_async(device.device_information.id)
             pairing = info.pairing
             if pairing.is_paired:
                 return
             level = DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION
-            operation = pairing.pair_with_protection_level_async(level)
+            if pin is None:
+                stage = "PAIR"
+                operation = pairing.pair_with_protection_level_async(level)
+            else:
+                from winrt.windows.devices.enumeration import DevicePairingKinds
+                stage = "CUSTOM"
+                custom = pairing.custom
+
+                def provide_pin(_sender, args):
+                    if args.pairing_kind == DevicePairingKinds.PROVIDE_PIN:
+                        args.accept_with_pin(pin)
+
+                token = custom.add_pairing_requested(provide_pin)
+                operation = custom.pair_with_protection_level_async(DevicePairingKinds.PROVIDE_PIN, level)
             result = await operation
             status = result.status
             if status == DevicePairingResultStatus.ALREADY_PAIRED:
                 return
             if status == DevicePairingResultStatus.PAIRED and result.protection_level_used == level:
                 return
+            detail = f"{_winrt_enum(status)}/{_winrt_enum(result.protection_level_used)}"
             if status == DevicePairingResultStatus.PAIRING_CANCELED:
-                raise DeviceError("BLE_PAIR_CANCELLED")
-            raise DeviceError("BLE_PAIR_FAILED")
+                raise DeviceError("BLE_PAIR_CANCELLED", detail)
+            if pin is None and _winrt_enum(status) == "REQUIRED_HANDLER_NOT_REGISTERED":
+                raise PairingPinRequired("BLE_PAIR_PIN_REQUIRED", detail)
+            raise DeviceError("BLE_PAIR_FAILED", detail)
     except (TimeoutError, asyncio.CancelledError) as error:
         if operation is not None:
             try:
@@ -129,13 +161,25 @@ async def pair_windows_device(target):
             except OSError:
                 pass  # The Windows operation may already have completed.
         if isinstance(error, TimeoutError):
-            raise DeviceError("BLE_PAIR_TIMEOUT") from error
+            raise DeviceError("BLE_PAIR_TIMEOUT", stage) from error
         raise
     except OSError as error:
-        raise DeviceError("BLE_PAIR_FAILED") from error
+        hresult = getattr(error, "winerror", None)
+        if type(hresult) is not int and error.args and type(error.args[0]) is int and error.args[0] < 0:
+            hresult = error.args[0]
+        detail = f"{stage}/0x{hresult & 0xffffffff:08X}" if type(hresult) is int else stage
+        raise DeviceError("BLE_PAIR_FAILED", detail) from error
     finally:
+        if token is not None:
+            try:
+                custom.remove_pairing_requested(token)
+            except OSError:
+                pass
         if device is not None:
-            device.close()
+            try:
+                device.close()
+            except OSError:
+                pass  # Preserve the pairing result if WinRT already closed its handle.
 
 
 class BleLink:
@@ -148,6 +192,7 @@ class BleLink:
         self.lock = asyncio.Lock()
         self.number = 0
         self.allow_pairing = False
+        self.pairing_pin = None
 
     @staticmethod
     async def scan():
@@ -159,7 +204,11 @@ class BleLink:
 
     async def open(self, received, disconnected):
         if self.allow_pairing and sys.platform == "win32":
-            await pair_windows_device(self.target)
+            pin, self.pairing_pin = self.pairing_pin, None
+            if pin is None:
+                await pair_windows_device(self.target)
+            else:
+                await pair_windows_device(self.target, pin=pin)
         # WinRT's UUID-filtered discovery can fail with ERROR_BAD_COMMAND.
         self.client = BleakClient(
             self.target, timeout=15,
@@ -206,16 +255,22 @@ class Client:
         self.time_received = 0.0
         self.closing = False
         self.updating = False
+        self.pin_pairing_target = None
 
-    async def connect(self, mode, target, expected_device=None, *, allow_pairing=False):
+    async def connect(self, mode, target, expected_device=None, *, allow_pairing=False, pairing_pin=None):
         if self.link:
             raise DeviceError("BUSY")
+        allowed_pin_target, self.pin_pairing_target = self.pin_pairing_target, None
+        if pairing_pin is not None and (mode != "ble" or not allow_pairing or expected_device is not None
+                                        or target is not allowed_pin_target):
+            raise DeviceError("BLE_PAIR_FAILED")
         self.latest = {}
         self.info = {}
         self.client_id = secrets.randbits(32) or 1
         link = SerialLink(target) if mode == "usb" else BleLink(target)
         if mode == "ble" and allow_pairing and expected_device is None:
             link.allow_pairing = True
+            link.pairing_pin = pairing_pin
         try:
             try:
                 info = await self.identify(link)
@@ -249,6 +304,10 @@ class Client:
             raise
         except Exception as error:
             await self.close(graceful=False)
+            if isinstance(error, PairingPinRequired) and mode == "ble" and allow_pairing:
+                self.pin_pairing_target = target
+            elif isinstance(error, DeviceError) and str(error).startswith("BLE_PAIR_PIN_REQUIRED:"):
+                raise DeviceError("LINK_ERROR") from error
             if mode == "ble" and isinstance(error, BleakError) and (
                 "Protocol Error 0x05:" in str(error) or "Protocol Error 0x0F:" in str(error)
             ):
