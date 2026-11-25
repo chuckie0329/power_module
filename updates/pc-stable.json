@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.4",
+    "version": "1.0.5",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.4/PowerModule-PC.exe",
-    "sha256": "9061381c221d1dbe0e1626ef5ff3f0a919612e1c3ff94c1c74e6d1461f0504e3",
-    "size": 38677817,
-    "notes": "升级保留 PowerModule-PC.exe 路径与桌面快捷方式。新增手动连接时的 Windows 蓝牙配对。固件不变。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.5/PowerModule-PC.exe",
+    "sha256": "f1231f9c3e6f329ebcbe73fc01255b629512aba39d0a939045f582c6b9c8f1c4",
+    "size": 38680262,
+    "notes": "修复 Windows BLE 首次连接和升级窗口首开显示；保留 EXE 文件名与桌面快捷方式。固件不变。"
   }
 }
