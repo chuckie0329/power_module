@@ -5,7 +5,7 @@ import sys
 from tempfile import mkdtemp
 from threading import Thread
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import QEvent, Qt, Signal, Slot
 from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QPushButton
 
 from pc_client.online_updates import cache_firmware, catalog_revision, check_catalog, download_client, version_key
@@ -45,6 +45,7 @@ class UpdateDialog(QDialog):
         self.setWindowTitle("升级")
         self.setMinimumWidth(510)
         layout = QGridLayout(self)
+        layout.setColumnStretch(0, 1)
         for row, kind in enumerate(("pc", "firmware")):
             self.rows[kind] = QLabel()
             self.rows[kind].setTextFormat(Qt.TextFormat.PlainText)
@@ -66,6 +67,16 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.manual, 3, 1)
         self.done.connect(self.finished_operation)
         self._render()
+
+    def event(self, event):
+        handled = super().event(event)
+        if event.type() in (QEvent.Type.Show, QEvent.Type.LayoutRequest) and self.isVisible():
+            # The dialog opens with short loading text. A catalog reply can
+            # increase the wrapped height without growing the top-level window.
+            height = self.layout().totalHeightForWidth(self.width())
+            if height > self.height():
+                self.resize(self.width(), height)
+        return handled
 
     def set_firmware(self, firmware):
         self.firmware = firmware
