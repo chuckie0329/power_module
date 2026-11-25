@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..'))
 $successor = (Resolve-Path 'pc_client/build/PowerModule-PC.exe').Path
 $next = python -c "from pc_client.version import PC_VERSION; print(PC_VERSION)"
-if ($LASTEXITCODE -ne 0 -or $next -ne '1.0.4') { throw 'Unexpected successor version for native migration smoke.' }
+if ($LASTEXITCODE -ne 0 -or $next -notmatch '^\d+\.\d+\.\d+$') { throw 'Unexpected successor version for native migration smoke.' }
 $root = Join-Path ([System.IO.Path]::GetTempPath()) ("pm-legacy-ci-" + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $root | Out-Null
 
@@ -29,12 +29,12 @@ from pc_client import online_updates as online
 asset = Path(os.environ["PM_CI_NEXT_EXE"])
 with asset.open("rb") as source:
     sha = file_digest(source, "sha256").hexdigest()
-version = "1.0.4"
+version = os.environ["PM_CI_NEXT_VERSION"]
 url = online.release_url("pc", version)
 update = online.parse_catalog({"schema": 1, "kind": "pc", "stable": {
     "version": version, "target": "windows-x64", "url": url, "sha256": sha,
     "size": asset.stat().st_size}}, "pc")
-assert online._windows_file_version(asset) == (1, 0, 4, 0)
+assert online._windows_file_version(asset) == (*online.version_key(version), 0)
 def offline_download(requested, hosts, **kwargs):
     assert requested == url and hosts == online.DOWNLOAD_HOSTS
     return asset.open("rb")
@@ -63,6 +63,7 @@ raise SystemExit(app.main())
     } finally { Pop-Location }
 
     $env:PM_CI_NEXT_EXE = $successor
+    $env:PM_CI_NEXT_VERSION = $next
     $newHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $successor).Hash
     foreach ($previousName in @('PowerModule-PC.exe','PowerModule-PC-v1.0.3.exe')) {
         $location = Join-Path $root ("install-" + [guid]::NewGuid())
@@ -98,7 +99,7 @@ raise SystemExit(app.main())
             while (-not (Test-Path -LiteralPath $marker) -and [DateTime]::UtcNow -lt $launchDeadline) {
                 Start-Sleep -Milliseconds 150
             }
-            if (-not (Test-Path -LiteralPath $marker) -or (Get-Content -Raw $marker) -ne '1.0.4') {
+            if (-not (Test-Path -LiteralPath $marker) -or (Get-Content -Raw $marker) -ne $next) {
                 throw "Restored shortcut does not launch new GUI for $previousName."
             }
             Write-Output "Canonical shortcut verified for $previousName"
@@ -109,6 +110,6 @@ raise SystemExit(app.main())
         }
     }
 } finally {
-    Remove-Item Env:PM_CI_NEXT_EXE -ErrorAction SilentlyContinue
+    Remove-Item Env:PM_CI_NEXT_EXE, Env:PM_CI_NEXT_VERSION -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

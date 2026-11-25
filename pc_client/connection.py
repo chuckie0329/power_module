@@ -1,5 +1,6 @@
 import asyncio
 from base64 import b64encode
+import re
 import secrets
 import sys
 import struct
@@ -38,9 +39,16 @@ def retains_outputs(info):
 
 
 class DeviceError(Exception):
-    def __init__(self, code):
-        super().__init__(code)
+    def __init__(self, code, detail=None):
+        super().__init__(f"{code}:{detail}" if detail else code)
         self.code = code
+
+
+def _winrt_enum(value):
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and re.fullmatch(r"[A-Z][A-Z_0-9]{0,47}", name):
+        return name
+    return "UNKNOWN"
 
 
 class SerialLink:
@@ -84,20 +92,27 @@ class SerialLink:
 
 
 async def pair_windows_device(target):
-    # Bleak 2.1.1's pair=True only implements the WinRT ConfirmOnly
-    # ceremony. Basic pairing lets Windows handle the firmware's PIN.
+    # Query pairing first. An unpaired device must use the user-entered
+    # firmware PIN using authenticated WinRT ProvidePin, not Basic PairAsync.
     from winrt.windows.devices.bluetooth import BluetoothAddressType, BluetoothLEDevice
     from winrt.windows.devices.enumeration import (
-        DeviceInformation, DevicePairingProtectionLevel, DevicePairingResultStatus,
+        DeviceInformation, DevicePairingKinds, DevicePairingProtectionLevel, DevicePairingResultStatus,
     )
 
     details = getattr(target, "details", None)
-    advertisement = getattr(details, "adv", None) or getattr(details, "scan", None)
+    packets = (getattr(details, "adv", None), getattr(details, "scan", None))
+    advertisement = packets[0] or packets[1]
     address = getattr(advertisement, "bluetooth_address", None)
-    if address is None:
+    advertised_services = {
+        str(service).lower()
+        for packet in packets
+        for service in getattr(getattr(packet, "advertisement", None), "service_uuids", ())
+    }
+    if address is None or SERVICE.lower() not in advertised_services:
         raise DeviceError("BLE_RESCAN")
     address_type = getattr(advertisement, "bluetooth_address_type", None)
-    device = operation = None
+    device = operation = custom = token = None
+    stage = "DEVICE"
     try:
         async with asyncio.timeout(50):
             if address_type in (BluetoothAddressType.PUBLIC, BluetoothAddressType.RANDOM):
@@ -107,21 +122,49 @@ async def pair_windows_device(target):
                 device = await BluetoothLEDevice.from_bluetooth_address_async(address)
             if device is None:
                 raise DeviceError("BLE_RESCAN")
-            info = await DeviceInformation.create_from_id_async(device.device_information.id)
+            stage = "INFORMATION"
+            device_id = device.device_information.id
+            info = await DeviceInformation.create_from_id_async(device_id)
             pairing = info.pairing
             if pairing.is_paired:
                 return
             level = DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION
-            operation = pairing.pair_with_protection_level_async(level)
+            stage = "CUSTOM"
+            custom = pairing.custom
+
+            def provide_pin(_sender, args):
+                if args.pairing_kind == DevicePairingKinds.PROVIDE_PIN:
+                    # This is the project's documented fixed firmware PIN.
+                    # Never acknowledge other ceremonies or click system consent.
+                    args.accept_with_pin("112233")
+
+            token = custom.add_pairing_requested(provide_pin)
+            operation = custom.pair_with_protection_level_async(DevicePairingKinds.PROVIDE_PIN, level)
             result = await operation
             status = result.status
             if status == DevicePairingResultStatus.ALREADY_PAIRED:
                 return
             if status == DevicePairingResultStatus.PAIRED and result.protection_level_used == level:
                 return
+            if status == DevicePairingResultStatus.PAIRED and _winrt_enum(result.protection_level_used) == "NONE":
+                # Some WinRT stacks report NONE in the immediate result even
+                # though a secure bond was made. Require a fresh OS readback.
+                stage = "PROTECTION"
+                for attempt in range(3):
+                    if attempt:
+                        await asyncio.sleep(.2)
+                    fresh = await DeviceInformation.create_from_id_async(device_id)
+                    if fresh.id != device_id:
+                        raise DeviceError("BLE_PAIR_FAILED", "PROTECTION/WRONG_DEVICE")
+                    state = fresh.pairing
+                    if state.is_paired and state.protection_level == level:
+                        return
+                    if _winrt_enum(state.protection_level) not in ("NONE", "DEFAULT"):
+                        break
+            detail = f"{_winrt_enum(status)}/{_winrt_enum(result.protection_level_used)}"
             if status == DevicePairingResultStatus.PAIRING_CANCELED:
-                raise DeviceError("BLE_PAIR_CANCELLED")
-            raise DeviceError("BLE_PAIR_FAILED")
+                raise DeviceError("BLE_PAIR_CANCELLED", detail)
+            raise DeviceError("BLE_PAIR_FAILED", detail)
     except (TimeoutError, asyncio.CancelledError) as error:
         if operation is not None:
             try:
@@ -129,13 +172,25 @@ async def pair_windows_device(target):
             except OSError:
                 pass  # The Windows operation may already have completed.
         if isinstance(error, TimeoutError):
-            raise DeviceError("BLE_PAIR_TIMEOUT") from error
+            raise DeviceError("BLE_PAIR_TIMEOUT", stage) from error
         raise
     except OSError as error:
-        raise DeviceError("BLE_PAIR_FAILED") from error
+        hresult = getattr(error, "winerror", None)
+        if type(hresult) is not int and error.args and type(error.args[0]) is int and error.args[0] < 0:
+            hresult = error.args[0]
+        detail = f"{stage}/0x{hresult & 0xffffffff:08X}" if type(hresult) is int else stage
+        raise DeviceError("BLE_PAIR_FAILED", detail) from error
     finally:
+        if token is not None:
+            try:
+                custom.remove_pairing_requested(token)
+            except OSError:
+                pass
         if device is not None:
-            device.close()
+            try:
+                device.close()
+            except OSError:
+                pass  # Preserve the pairing result if WinRT already closed its handle.
 
 
 class BleLink:

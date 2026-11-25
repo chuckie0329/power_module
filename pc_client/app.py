@@ -1,4 +1,5 @@
 from html import escape
+import re
 import sys
 from threading import Event
 import time
@@ -82,6 +83,24 @@ ERRORS = {
 
 
 def error_text(value):
+    if not isinstance(value, str):
+        return value
+    code, sep, detail = value.partition(":")
+    if sep and code in {"BLE_PAIR_FAILED", "BLE_PAIR_TIMEOUT", "BLE_PAIR_CANCELLED"}:
+        if not re.fullmatch(r"[A-Z][A-Z_0-9]{0,47}(?:/(?:[A-Z][A-Z_0-9]{0,47}|0x[0-9A-F]{8}))?", detail):
+            return ERRORS[code]
+        status = detail.split("/", 1)[0]
+        explanation = {
+            "PAIRED": "Windows 返回已配对，但保护等级不足，客户端未继续连接。请在 Windows 设置中检查配对。",
+            "AUTHENTICATION_FAILURE": "Windows 或设备拒绝了认证。请核对设备和配对提示；若有旧配对记录，可在 Windows 中移除后重试。",
+            "AUTHENTICATION_TIMEOUT": "Windows 的认证超时。请重新连接，并在出现系统提示时及时完成配对。",
+            "AUTHENTICATION_NOT_ALLOWED": "Windows 或设备不支持这次认证方式。请在 Windows 设置中先手动配对。",
+            "PROTECTION_LEVEL_COULD_NOT_BE_MET": "这次配对未达到加密和认证要求。请在 Windows 设置中先手动配对。",
+            "REQUIRED_HANDLER_NOT_REGISTERED": "Windows 未能处理需要的配对操作。请在 Windows 设置中先手动配对。",
+            "REMOTE_DEVICE_HAS_ASSOCIATION": "设备已有配对关联。请先断开其他电脑，并检查双方的旧配对记录。",
+            "ACCESS_DENIED": "Windows 拒绝应用请求配对。请检查蓝牙权限，或在 Windows 设置中先手动配对。",
+        }.get(status, ERRORS[code])
+        return f"{explanation}［Windows: {detail}］"
     return ERRORS.get(value, value)
 
 
@@ -504,7 +523,7 @@ class Window(QMainWindow):
         elif self.target.currentData() is not None:
             self.connect_target = self.target.currentData()
             if self.kind == "ble":
-                self.announce("正在连接蓝牙。如 Windows 提示配对，请确认所选设备并输入 PIN 112233。")
+                self.announce("正在连接蓝牙。若尚未配对，客户端将请求安全配对；如 Windows 要求确认，请核对设备。")
                 self.launch("connect", self.worker.client.connect(self.kind, self.connect_target, allow_pairing=True))
             else:
                 self.announce("正在读取设备信息…")
