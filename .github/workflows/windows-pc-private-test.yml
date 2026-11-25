@@ -23,7 +23,7 @@ jobs:
       - name: Mark this executable as a private test and build
         shell: pwsh
         run: |
-          python -c "from pathlib import Path; p=Path('pc_client/app.py'); a=p.read_text(encoding='utf-8'); a=a.replace('v{PC_VERSION}', 'v{PC_VERSION} [TEST 2]'); p.write_text(a,encoding='utf-8')"
+          python -c "from pathlib import Path; p=Path('pc_client/app.py'); a=p.read_text(encoding='utf-8'); a=a.replace('v{PC_VERSION}', 'v{PC_VERSION} [TEST 3]'); p.write_text(a,encoding='utf-8')"
           if ($LASTEXITCODE -ne 0) { throw 'Could not label the test UI.' }
           ./tools/build_pc_windows.ps1
       - name: Start the packaged GUI and verify icon, version and update catalogs
@@ -37,7 +37,7 @@ jobs:
           Write-Output "TEST_ASSET $sha $($exe.Length)"
       - uses: actions/upload-artifact@v4
         with:
-          name: PowerModule-PC-BLE-Layout-TEST2
+          name: PowerModule-PC-BLE-Layout-TEST3
           path: |
             pc_client/build/PowerModule-PC.exe
             pc_client/build/SHA256SUMS.txt

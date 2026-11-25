@@ -15,6 +15,7 @@ class Address(IntEnum):
 
 
 class Protection(IntEnum):
+    NONE = 0
     ENCRYPTION = 1
     ENCRYPTION_AND_AUTHENTICATION = 2
 
@@ -138,6 +139,25 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         provide.accept_with_pin.assert_called_once_with("112233")
         custom.remove_pairing_requested.assert_called_once_with(token)
         self.pairing.pair_with_protection_level_async.assert_not_called()
+
+    async def test_paired_none_requires_fresh_authenticated_bond_on_same_device(self):
+        ordinary = SimpleNamespace(id="selected-device", pairing=self.pairing)
+        self.pairing.custom.pair_with_protection_level_async.return_value = PairOperation(
+            SimpleNamespace(status=Result.PAIRED, protection_level_used=Protection.NONE))
+        for readbacks, ok in (
+            ([(True, Protection.NONE), (True, Protection.ENCRYPTION_AND_AUTHENTICATION)], True),
+            ([(True, Protection.ENCRYPTION)], False),
+            ([(False, Protection.NONE)] * 3, False),
+        ):
+            with self.subTest(readbacks=readbacks):
+                fresh = [SimpleNamespace(id="selected-device", pairing=SimpleNamespace(
+                    is_paired=paired, protection_level=level)) for paired, level in readbacks]
+                self.enum.create_from_id_async.side_effect = [ordinary, *fresh]
+                if ok:
+                    await pair_windows_device(self.selected)
+                else:
+                    with self.assertRaisesRegex(DeviceError, "BLE_PAIR_FAILED:PAIRED/NONE"):
+                        await pair_windows_device(self.selected)
 
     async def test_timeout_cancels_the_windows_operation(self):
         operation = PairOperation(delay=60)

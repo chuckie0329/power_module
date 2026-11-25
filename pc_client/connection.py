@@ -123,7 +123,8 @@ async def pair_windows_device(target):
             if device is None:
                 raise DeviceError("BLE_RESCAN")
             stage = "INFORMATION"
-            info = await DeviceInformation.create_from_id_async(device.device_information.id)
+            device_id = device.device_information.id
+            info = await DeviceInformation.create_from_id_async(device_id)
             pairing = info.pairing
             if pairing.is_paired:
                 return
@@ -145,6 +146,21 @@ async def pair_windows_device(target):
                 return
             if status == DevicePairingResultStatus.PAIRED and result.protection_level_used == level:
                 return
+            if status == DevicePairingResultStatus.PAIRED and _winrt_enum(result.protection_level_used) == "NONE":
+                # Some WinRT stacks report NONE in the immediate result even
+                # though a secure bond was made. Require a fresh OS readback.
+                stage = "PROTECTION"
+                for attempt in range(3):
+                    if attempt:
+                        await asyncio.sleep(.2)
+                    fresh = await DeviceInformation.create_from_id_async(device_id)
+                    if fresh.id != device_id:
+                        raise DeviceError("BLE_PAIR_FAILED", "PROTECTION/WRONG_DEVICE")
+                    state = fresh.pairing
+                    if state.is_paired and state.protection_level == level:
+                        return
+                    if _winrt_enum(state.protection_level) not in ("NONE", "DEFAULT"):
+                        break
             detail = f"{_winrt_enum(status)}/{_winrt_enum(result.protection_level_used)}"
             if status == DevicePairingResultStatus.PAIRING_CANCELED:
                 raise DeviceError("BLE_PAIR_CANCELLED", detail)
