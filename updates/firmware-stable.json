@@ -2,12 +2,12 @@
   "schema": 1,
   "kind": "firmware",
   "stable": {
-    "version": "1.2.5",
+    "version": "1.2.6",
     "target": "PowerModule-ESP32",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.5/PowerModule-ESP32.bin",
-    "sha256": "0a1c0e6fad5ea2560e5e274fdd8d3d0accb08532abcce316eb163823f7593598",
-    "size": 668432,
-    "notes": "USB 诊断新增蓝牙断开前的 RSSI、实际连接参数和发送失败计数；不改变蓝牙连接参数。建议配合客户端 1.0.10，升级前关闭主输出和两路继电器。",
+    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.bin",
+    "sha256": "7352b43a36716c575a5d9770cdb749df87146de33ab703f4c968cf83f585e817",
+    "size": 668688,
+    "notes": "增加蓝牙首次和末次通知提交失败的原始错误码及距断开的时间；不改蓝牙参数。客户端 1.0.10 可直接导出，升级前关闭主输出和两路继电器。",
     "protocol": 1
   }
 }
