@@ -8,6 +8,7 @@ __pycache__/
 /pc_client/build/
 
 # Local settings and generated files
+/sequences/
 /.vscode/
 .env
 .env.*

@@ -14,6 +14,7 @@ import serial
 from serial.tools import list_ports
 
 from pc_client.diagnostics import InvalidDiagnosticReply, read_snapshot
+from pc_client.relay_sequence import output_profile, validate_steps
 from pc_client.protocol import (
     COMMAND, HEARTBEAT, RESPONSE, SERVICE, STATE, VERSION,
     Fragments, Lines, decode, encode, fragments,
@@ -273,12 +274,15 @@ class Client:
         self.closing = False
         self.updating = False
         self.diagnosing = False
+        self.relay_epoch = 0
+        self.state_received = 0.0
 
     async def connect(self, mode, target, expected_device=None, *, allow_pairing=False):
         if self.link:
             raise DeviceError("BUSY")
         self.latest = {}
         self.info = {}
+        self.state_received = 0.0
         self.client_id = secrets.randbits(32) or 1
         link = SerialLink(target) if mode == "usb" else BleLink(target)
         if mode == "ble" and allow_pairing and expected_device is None:
@@ -342,9 +346,11 @@ class Client:
                     and self.link.name == "usb" and message["type"] == "state"):
                 self.info = {**self.info, "sx_model_raw": None}
                 previous = None
+                self.relay_epoch += 1
                 self.worker.notice.emit("设备已重新启动", "")
             # An older response can arrive after a newer snapshot over BLE.
             if previous is None or not ((uptime - previous) & 0x80000000):
+                self.state_received = self.time_received
                 self.latest = {
                     key: value for key, value in message.items()
                     if key in ("state_rev", "uptime_ms", "mode", "applied", "measured", "protection", "fault")
@@ -404,6 +410,77 @@ class Client:
         if not self.info.get("direct_control"):
             raise DeviceError("FIRMWARE_UPDATE")
         return await self.call(operation, args, revision)
+
+    async def run_relay_sequence(self, device, steps, cancelled, profile=None, expected_enabled=None):
+        steps = validate_steps(steps)
+        link, epoch = self.link, self.relay_epoch
+        done, pending = 0, None
+        opens_output = any(step.output is True for step in steps)
+
+        def check():
+            if cancelled():
+                raise DeviceError("RELAY_STOPPED")
+            if (link is None or self.link is not link or not self.ready or self.closing
+                    or self.relay_epoch != epoch or self.info.get("device_id") != device):
+                raise DeviceError("LINK_ERROR")
+            if (not self.info.get("direct_control") or self.updating or self.diagnosing
+                    or time.monotonic() - self.state_received >= 6
+                    or self.latest.get("measured", {}).get("fresh") is not True
+                    or self.latest.get("mode") in ("protect", "initializing", "stopping", "unknown")
+                    or not all(type(self.latest.get("applied", {}).get(f"relay{k}")) is bool for k in (1, 2))):
+                raise DeviceError("RELAY_NOT_READY")
+            if opens_output and (profile is None or output_profile(self.latest) != profile
+                                 or type(expected_enabled) is not bool
+                                 or self.latest.get("applied", {}).get("enabled") is not expected_enabled):
+                raise DeviceError("RELAY_OUTPUT_CHANGED")
+
+        async def set_output(enabled):
+            nonlocal pending, expected_enabled
+            check()
+            args, revision = {}, None
+            if enabled:
+                _, voltage, current = profile
+                revision = self.latest.get("state_rev")
+                if type(revision) is not int or not 0 <= revision <= 0xFFFFFFFF:
+                    raise DeviceError("RELAY_OUTPUT_CHANGED")
+                args = {"voltage_mV": voltage, "current_mA": current, "enabled": True}
+            pending = "output"
+            reply = await self.change("set_output" if enabled else "output_off", args, revision)
+            if (reply.get("applied", {}).get("enabled") is not enabled
+                    or reply.get("measured", {}).get("fresh") is not True
+                    or (enabled and output_profile(reply) != profile)
+                    or self.link is not link or self.relay_epoch != epoch or not self.ready):
+                raise DeviceError("RELAY_OUTPUT_READBACK")
+            expected_enabled = enabled
+            pending = None
+
+        try:
+            for index, step in enumerate(steps, 1):
+                check()
+                self.worker.relay_progress.emit(index, len(steps), step.wait_ms)
+                deadline = time.monotonic() + step.wait_ms / 1000
+                while (remaining := deadline - time.monotonic()) > 0:
+                    await asyncio.sleep(min(remaining, 0.1))
+                    check()
+                if step.output is False:
+                    await set_output(False)
+                for channel, state in enumerate((step.k1, step.k2), 1):
+                    if state is None:
+                        continue
+                    check()
+                    pending = channel
+                    reply = await self.change("set_relay", {"channel": channel, "enabled": state}, None)
+                    if (reply.get("applied", {}).get(f"relay{channel}") is not state
+                            or self.link is not link or self.relay_epoch != epoch or not self.ready):
+                        raise DeviceError("RELAY_READBACK")
+                    pending = None
+                if step.output is True:
+                    await set_output(True)
+                done = index
+        except Exception as error:
+            return {"done": done, "total": len(steps), "pending": pending,
+                    "error": str(error) or "LINK_ERROR"}
+        return {"done": done, "total": len(steps), "pending": None, "error": ""}
 
     async def apply_protection(self, group, revision, operations):
         """Apply requested blocks in order, carrying the verified revision forward."""
@@ -621,6 +698,7 @@ class LinkWorker(QObject):
     disconnected = Signal(str)
     state = Signal(object, float, bool)
     notice = Signal(str, str)
+    relay_progress = Signal(int, int, int)
     update_progress = Signal(int, int, str)
     finished = Signal(str, object, str)
 

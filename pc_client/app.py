@@ -19,6 +19,8 @@ from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
 from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
 from pc_client.pc_upgrade import pending_handoff, run_upgrade_worker, smoke_handoff, smoke_startup
+from pc_client.relay_dialog import RelaySequenceDialog
+from pc_client.relay_sequence import SequenceStore, output_profile, sequence_directory
 from pc_client.theme import STYLES, icon
 from pc_client.update_dialog import UpdateDialog
 from pc_client.version import PC_VERSION
@@ -27,6 +29,7 @@ from pc_client.version import PC_VERSION
 GROUP_NOTE_ROLE = Qt.ItemDataRole.UserRole + 1
 GROUP_SWITCH = "切换数据组"
 APPLY_PROTECTION = "应用保护阈值"
+RELAY_SEQUENCE = "时序控制"
 CONTROL_RAIL_WIDTH = 224
 MAX_MEMORY_GROUP = 10  # SX150C firmware supports eleven slots, M0 through M10.
 MAX_OUTPUT_MW = 75000
@@ -56,6 +59,11 @@ ERRORS = {
     "BAD_VERSION": "该端口返回了不兼容的协议。",
     "INITIALIZING": "等待 SX150C 完成状态同步。",
     "LINK_ERROR": "设备连接已失效。",
+    "RELAY_STOPPED": "已按请求停止。",
+    "RELAY_NOT_READY": "设备状态不再满足运行条件。",
+    "RELAY_OUTPUT_CHANGED": "主输出状态或设备设定有变化，未继续执行。",
+    "RELAY_OUTPUT_READBACK": "未确认主输出达到目标状态。",
+    "RELAY_READBACK": "继电器读回与目标状态不一致，或连接已变化。",
     "BLE_RESCAN": "找不到已选蓝牙设备，请重新扫描并选择设备。",
     "BLE_PAIR_CANCELLED": "已取消蓝牙配对。再次点击连接可重试。",
     "BLE_PAIR_TIMEOUT": "等待 Windows 蓝牙配对超时。请再次连接并查看系统配对提示。",
@@ -202,6 +210,7 @@ class Window(QMainWindow):
         self.worker.disconnected.connect(self.disconnected)
         self.worker.state.connect(self.state_read)
         self.worker.finished.connect(self.finished)
+        self.worker.relay_progress.connect(self.relay_progress)
         self.worker.notice.connect(self.noticed)
         self.worker.update_progress.connect(self.show_update_progress)
         self.history = PowerHistory()
@@ -222,6 +231,9 @@ class Window(QMainWindow):
         self.tray = None
         self.hidden_chart_dialog = None
         self.update_dialog = None
+        self.sequence_store = SequenceStore(sequence_directory())
+        self.loaded_sequence = None
+        self.relay_cancel = Event()
         self.diagnostic_path = None
         self.pc_handoff = False
         self.saved_pc_resume = None
@@ -514,6 +526,31 @@ class Window(QMainWindow):
             relay_row.addWidget(item, 1)
         relay_layout.addLayout(relay_row)
         layout.addWidget(relays)
+
+        sequence, seq_layout = card("时序控制")
+        seq_layout.setContentsMargins(11, 10, 11, 10)
+        sequence.setStyleSheet("QPushButton { padding: 1px 7px; }")
+        self.sequence_selector = QComboBox()
+        self.sequence_selector.setAccessibleName("已保存的时序")
+        self.sequence_selector.setToolTip(f"保存位置：{self.sequence_store.directory}")
+        self.sequence_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.sequence_selector.currentIndexChanged.connect(self.load_relay_sequence)
+        seq_layout.addWidget(self.sequence_selector)
+        self.sequence_run = button("运行", self.run_or_stop_relay_sequence, "primary")
+        self.sequence_new = button("新建", lambda: self.edit_relay_sequence(False))
+        self.sequence_edit = button("编辑", lambda: self.edit_relay_sequence(True))
+        actions_row = QHBoxLayout()
+        for control in (self.sequence_run, self.sequence_new, self.sequence_edit):
+            actions_row.addWidget(control, 1)
+        seq_layout.addLayout(actions_row)
+        self.sequence_status = label("", "muted")
+        self.sequence_summary = label("", "muted")
+        for info in (self.sequence_summary, self.sequence_status):
+            info.setWordWrap(True)
+            info.setTextFormat(Qt.TextFormat.PlainText)
+            seq_layout.addWidget(info)
+        self.refresh_sequence_selector()
+        layout.addWidget(sequence)
         layout.addStretch(1)
         return left
 
@@ -576,6 +613,7 @@ class Window(QMainWindow):
         if self.pc_handoff:
             return
         if self.info:
+            self.cancel_relay_sequence()
             self.announce("正在断开…")
             self.launch("disconnect", self.worker.client.close())
         elif self.target.currentData() is not None:
@@ -888,12 +926,15 @@ class Window(QMainWindow):
     def update_sampling(self):
         period = self.sampling.currentData()
         if (not self.pc_handoff and self.info.get("stream_period") and period is not None and period != self.period_ms
-                and not self.jobs & {"采样频率", "固件升级"}):
+                and not self.jobs & {"采样频率", "固件升级", RELAY_SEQUENCE}):
             self.launch("采样频率", self.worker.client.call("set_stream_period", {"period_ms": period}))
 
     @Slot(str, object, str)
     def finished(self, action, result, error):
         self.jobs.discard(action)
+        if action == RELAY_SEQUENCE:
+            self.finish_relay_sequence(result, error)
+            return
         if action == DIAGNOSTIC_ACTION:
             if error:
                 self.announce(error_text(error), True)
@@ -1154,12 +1195,165 @@ class Window(QMainWindow):
         if ok:
             self.change("OCP 单位", "match_ocp", {"ocp_mA": round(reading * 1000)}, revision=True)
 
+    def refresh_sequence_selector(self, selected=None):
+        selected = selected or self.sequence_selector.currentData()
+        names = []
+        problem = ""
+        try:
+            names = self.sequence_store.names()
+        except OSError:
+            problem = "无法读取本地时序目录。"
+        with QSignalBlocker(self.sequence_selector):
+            self.sequence_selector.clear()
+            self.sequence_selector.setPlaceholderText("选择时序" if names else "没有保存的时序")
+            for name in names:
+                self.sequence_selector.addItem(name, name)
+            self.sequence_selector.setCurrentIndex(self.sequence_selector.findData(selected) if selected else -1)
+        if problem:
+            self.loaded_sequence = None
+            self.sequence_status.setText(problem)
+            self.render()
+        else:
+            self.load_relay_sequence()
+
+    def load_relay_sequence(self):
+        if RELAY_SEQUENCE in self.jobs:
+            return
+        name = self.sequence_selector.currentData()
+        self.loaded_sequence = None
+        if name is None:
+            self.sequence_status.setText("请选择时序。" if self.sequence_selector.count() else "新建时序后可在这里选择。")
+        else:
+            try:
+                self.loaded_sequence = (name, self.sequence_store.load(name))
+                self.sequence_status.setText("已载入。")
+            except (ValueError, OSError) as error:
+                self.sequence_status.setText(f"未载入：{error}")
+        self.render()
+
+    def edit_relay_sequence(self, edit_existing):
+        if RELAY_SEQUENCE in self.jobs or self.exit_requested or self.pc_handoff:
+            return
+        name = self.sequence_selector.currentData() if edit_existing else None
+        try:
+            steps = self.sequence_store.load(name) if name is not None else ()
+        except (OSError, ValueError) as error:
+            self.sequence_status.setText(f"无法编辑：{error}")
+            return
+        dialog = RelaySequenceDialog(self.sequence_store, name, steps, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_sequence_selector(dialog.saved_name)
+        dialog.deleteLater()
+
+    def run_or_stop_relay_sequence(self):
+        if RELAY_SEQUENCE in self.jobs:
+            self.cancel_relay_sequence()
+            return
+        if self.loaded_sequence:
+            self.start_relay_sequence(self.loaded_sequence[1])
+
+    def render_relay_sequence(self):
+        running = RELAY_SEQUENCE in self.jobs
+        editable = not (running or self.exit_requested or self.pc_handoff)
+        selected = self.sequence_selector.currentData() is not None
+        self.sequence_selector.setEnabled(editable and self.sequence_selector.count() > 0)
+        self.sequence_new.setEnabled(editable)
+        self.sequence_edit.setEnabled(editable and selected)
+        problem = self.relay_sequence_blocker()
+        summary = ""
+        if self.loaded_sequence:
+            steps = self.loaded_sequence[1]
+            summary = f"{len(steps)} 步"
+            if any(step.output is True for step in steps):
+                profile = output_profile(self.state) if self.info and self.state.get("measured", {}).get("fresh") else None
+                if not problem and (profile is None or type(self.state.get("applied", {}).get("enabled")) is not bool):
+                    problem = "尚未读回有效的主输出设定。"
+                if profile is not None and (running or not problem):
+                    group, voltage, current = profile
+                    summary += f" · 会开启主输出（M{group}）\n{voltage / 1000:.2f} V / {current / 1000:.3f} A"
+                else:
+                    summary += " · 会开启主输出"
+        self.sequence_summary.setText(summary)
+        self.sequence_summary.setVisible(bool(summary))
+        self.sequence_run.setText("停止" if running else "运行")
+        dynamic(self.sequence_run, "role", "stop" if running else "primary")
+        self.sequence_run.setEnabled(not self.relay_cancel.is_set() if running else bool(self.loaded_sequence) and not problem)
+        self.sequence_run.setToolTip(
+            "停止后续动作，不会自动关闭主输出或释放继电器。" if running else
+            ("请先选择有效的时序。" if not self.loaded_sequence else problem or "立即运行所选时序。")
+        )
+
+    def relay_sequence_blocker(self):
+        if not self.info.get("direct_control"):
+            return "请先连接支持直接控制的设备。"
+        if self.jobs or self.pc_handoff or self.exit_requested:
+            return "请先等待当前设备操作完成。"
+        applied = self.state.get("applied", {})
+        if (time.monotonic() - self.last_receipt >= 6
+                or self.state.get("measured", {}).get("fresh") is not True
+                or self.state.get("mode") in ("protect", "initializing", "stopping", "unknown")
+                or not all(type(applied.get(f"relay{k}")) is bool for k in (1, 2))):
+            return "请确认设备状态正常且两路继电器已读回。"
+        return ""
+
+    @Slot(object)
+    def start_relay_sequence(self, steps):
+        problem = self.relay_sequence_blocker()
+        if problem:
+            self.sequence_status.setText(problem)
+            return
+        device = self.info["device_id"]
+        opens_output = any(step.output is True for step in steps)
+        profile = output_profile(self.state) if opens_output else None
+        applied_enabled = self.state.get("applied", {}).get("enabled")
+        if opens_output and (profile is None or type(applied_enabled) is not bool):
+            self.sequence_status.setText("未确认设备的输出设定，时序未启动。")
+            return
+        self.relay_cancel = Event()
+        self.sequence_status.setText("正在启动时序…")
+        self.launch(RELAY_SEQUENCE, self.worker.client.run_relay_sequence(
+            device, steps, self.relay_cancel.is_set, profile, applied_enabled,
+        ))
+
+    @Slot()
+    def cancel_relay_sequence(self):
+        if RELAY_SEQUENCE in self.jobs and not self.relay_cancel.is_set():
+            self.relay_cancel.set()
+            self.sequence_status.setText("正在停止后续步骤；不会自动关断。")
+            self.render()
+
+    @Slot(int, int, int)
+    def relay_progress(self, index, total, wait_ms):
+        if RELAY_SEQUENCE in self.jobs and not self.relay_cancel.is_set():
+            self.sequence_status.setText(f"第 {index}/{total} 步 · 等待 {wait_ms} 毫秒后执行")
+
+    def finish_relay_sequence(self, result, error):
+        result = result or {}
+        problem = error or result.get("error")
+        if problem:
+            message = f"时序已停止，完整执行 {result.get('done', 0)} 步。{error_text(problem)}"
+            if result.get("pending") == "output":
+                message += "请核对主输出的实际状态。"
+            elif result.get("pending") is not None:
+                message += f"请核对 K{result['pending']} 的实际状态。"
+            else:
+                message += "请核对当前继电器状态。"
+        else:
+            message = f"时序已完成，共 {result['done']} 步。"
+        self.sequence_status.setText(message)
+        self.announce(message, bool(problem and problem != "RELAY_STOPPED"))
+        self.render()
+
     def toggle_relay(self, channel):
         enabled = self.state.get("applied", {}).get(f"relay{channel}")
         if isinstance(enabled, bool):
             self.change(f"继电器 K{channel}", "set_relay", {"channel": channel, "enabled": not enabled})
 
     def change(self, action, operation, args, revision=False):
+        if RELAY_SEQUENCE in self.jobs:
+            if operation != "output_off":
+                return
+            self.cancel_relay_sequence()
         self.launch(action, self.worker.client.change(
             operation, args, self.state.get("state_rev") if revision else None,
         ))
@@ -1182,7 +1376,9 @@ class Window(QMainWindow):
         self.refresh.setEnabled(not connected and not link_pending)
         self.connect_button.setEnabled(not link_pending and (connected or self.target.count() > 0))
         self.connect_button.setText("断开" if connected else "连接")
-        self.float_button.setEnabled(not self.exit_requested and not self.jobs & {"固件升级", "disconnect"})
+        self.float_button.setEnabled(not self.exit_requested
+                                     and not self.jobs & {"固件升级", "disconnect", RELAY_SEQUENCE})
+        self.render_relay_sequence()
         self.update_button.setEnabled(not self.exit_requested and not self.pc_handoff)
         bond_problem = self.bond_recovery_status()
         self.bond_button.setEnabled(not bond_problem)
@@ -1343,6 +1539,7 @@ class Window(QMainWindow):
                 widget.setValue(value / 1000)
 
     def closeEvent(self, event):
+        self.cancel_relay_sequence()
         if self.pc_handoff:
             event.ignore()
             return
@@ -1443,12 +1640,20 @@ def main():
                 app.processEvents()
                 compact = panel.isVisible() and panel.width() < 260 and panel.height() < 90
                 panel.hide()
+                editor = RelaySequenceDialog(window.sequence_store, parent=window)
+                sequence_ok = (window.sequence_store.directory == Path(sys.executable).resolve().parent / "sequences"
+                               and window.sequence_selector.isVisible() and not hasattr(window, "sequence_load")
+                               and window.sequence_run.text() == "运行" and not window.sequence_run.isEnabled()
+                               and editor.table.columnCount() == 4 and editor.table.cellWidget(0, 3).count() == 3)
+                editor.close()
                 marker = Path(sys.argv[2])
-                if window.isVisible() and not window.windowIcon().isNull() and PC_VERSION in window.windowTitle() and compact:
+                if (window.isVisible() and not window.windowIcon().isNull() and PC_VERSION in window.windowTitle()
+                        and compact and sequence_ok):
                     marker.write_text(PC_VERSION, encoding="ascii")
                     result = 0
                 else:
-                    marker.write_text(f"main={window.isVisible()} floating={panel.width()}x{panel.height()}", encoding="ascii")
+                    marker.write_text(f"main={window.isVisible()} floating={panel.width()}x{panel.height()} sequence={sequence_ok}",
+                                      encoding="ascii")
             finally:
                 window.close()
                 app.exit(result)
