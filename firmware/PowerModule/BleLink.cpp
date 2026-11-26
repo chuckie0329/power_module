@@ -198,12 +198,12 @@ void BleLink::recover() {
             owner.clearConnection();
         }
         bool anyPeer() {
-            bool found = false;
-            ble_gap_conn_foreach_handle([](uint16_t, void* arg) -> int {
-                *static_cast<bool*>(arg) = true;
-                return 1;
-            }, &found);
-            return found;
+            // The wrapper's peer list can retain handles if a callback was missed.
+            // Confirm against GAP instead of treating each listed handle as live.
+            for (const auto peer : owner.server_->getPeerDevices()) {
+                if (ble_gap_conn_find(peer, nullptr) != BLE_HS_ENOTCONN) return true;
+            }
+            return false;
         }
         void restoreAdvertising() {
             if (!owner.allowAdvertisingRecovery_.load() || owner.advertisingBusy_.exchange(true)) return;
