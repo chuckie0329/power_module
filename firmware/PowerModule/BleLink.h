@@ -2,7 +2,11 @@
 
 #include <NimBLEDevice.h>
 #include <atomic>
+#ifdef CONFIG_NIMBLE_CPP_IDF
 #include <nimble/nimble_port.h>
+#else
+#include <nimble/porting/nimble/include/nimble/nimble_port.h>
+#endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "Protocol.h"
