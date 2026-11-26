@@ -2,7 +2,7 @@ name: Windows PC client
 
 on:
   push:
-    branches: [main, ci/pc-v1.0.11, ship/pc-v1.0.11]
+    branches: [main, ci/pc-v1.1.0, ship/pc-v1.1.0]
   workflow_dispatch:
 
 permissions:
@@ -40,7 +40,7 @@ jobs:
           $old = Join-Path $env:RUNNER_TEMP 'PowerModule-PC.exe'
           curl.exe -fsSL --retry 3 'https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.10/PowerModule-PC.exe' -o $old
           if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $old).Hash.ToLowerInvariant() -ne 'b5c2c4b937d8b0c680a99cf7374c6a3f25f757ddc7c0dc342723918cf340bb8c') { throw 'Invalid predecessor checksum' }
-          python -c "from pathlib import Path; import sys; from pc_client.pc_upgrade import _predecessor; assert _predecessor(Path(sys.argv[1]), '1.0.10', '1.0.11')" $old
+          python -c "from pathlib import Path; import sys; from pc_client.pc_upgrade import _predecessor; assert _predecessor(Path(sys.argv[1]), '1.0.10', '1.1.0')" $old
           if ($LASTEXITCODE -ne 0) { throw 'Invalid old client identity' }
       - name: Exercise the tagged v1.0.3 migration on Windows
         run: ./tools/smoke_legacy_upgrade_windows.ps1
@@ -52,7 +52,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.11'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.1.0'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           version="$(python3 -c 'from pc_client.version import PC_VERSION; print(PC_VERSION)')"
           tag="pc-v$version"
-          test "$tag" = pc-v1.0.11
+          test "$tag" = pc-v1.1.0
           test "ship/$tag" = "$GITHUB_REF_NAME"
           test "$GITHUB_SHA" = "$(git ls-remote origin refs/heads/main | cut -f1)"
           (cd dist; sha256sum PowerModule-PC.exe > SHA256SUMS.txt)
@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base="https://github.com/$GITHUB_REPOSITORY/releases/download/pc-v1.0.11"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/pc-v1.1.0"
           mkdir -p verification
           curl -fsSL --retry 5 --retry-all-errors "$base/PowerModule-PC.exe" -o verification/PowerModule-PC.exe
           curl -fsSL --retry 5 --retry-all-errors "$base/SHA256SUMS.txt" -o verification/SHA256SUMS.txt
