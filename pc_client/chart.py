@@ -1,6 +1,6 @@
 import math
 import time
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from datetime import datetime
 from itertools import groupby
 from operator import attrgetter
@@ -18,9 +18,12 @@ from pc_client.history import PowerHistory, save_csv
 SERIES = (
     ("volts", "电压", "V", "#2364b3", 2, 0.5),
     ("amps", "电流", "A", "#8b4a9e", 3, 0.05),
-    ("watts", "功率", "W", "#097b70", 2, 0.5),
+    ("watts", "功耗", "W", "#097b70", 2, 0.5),
 )
 CENTER = Qt.AlignmentFlag.AlignCenter
+AXIS_LABEL_WIDTH = 54
+AXIS_TICK_WIDTH = 32
+AXIS_TICK_ALIGN = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 MUTED = QColor("#586d80")
 
 
@@ -28,13 +31,14 @@ class OutputChart(QWidget):
     selection_started = Signal()
     selection_changed = Signal(float, float)
     selection_cancelled = Signal()
+    zoom_requested = Signal(float, float)
 
     def __init__(self):
         super().__init__()
         self.setMinimumSize(365, 205)
         self.setMouseTracking(True)
-        self.setAccessibleName("输出电压、电流和功率曲线")
-        self.setToolTip("按住鼠标左键横向拖动，选取统计时间段。")
+        self.setAccessibleName("输出电压、电流和功耗曲线")
+        self.setToolTip("滚轮以光标位置缩放时间轴；按住左键横向拖动可框选统计。")
         self.points = []
         self.start = self.end = 0.0
         self.wall_offset = 0.0
@@ -53,12 +57,30 @@ class OutputChart(QWidget):
         self.update()
 
     def plot_rect(self):
-        return QRectF(self.rect()).adjusted(47, 30, -91, -29)
+        return QRectF(self.rect()).adjusted(AXIS_LABEL_WIDTH + AXIS_TICK_WIDTH + 5, 22, -42, -29)
 
     def time_at(self, x):
         bounds = self.plot_rect()
         fraction = min(1.0, max(0.0, (x - bounds.left()) / bounds.width()))
         return self.start + fraction * (self.end - self.start)
+
+    def series_rect(self, bounds, axis):
+        if self.field is not None:
+            return bounds
+        gap = 10
+        height = (bounds.height() - 2 * gap) / len(SERIES)
+        return QRectF(bounds.left(), bounds.top() + axis * (height + gap), bounds.width(), height)
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        steps = delta / 120 if delta else event.pixelDelta().y() / 60
+        if (not steps or not self.points or self.anchor is not None
+                or not self.plot_rect().contains(event.position()) or self.start >= self.end):
+            event.ignore()
+            return
+        self.hover = event.position()
+        self.zoom_requested.emit(self.time_at(event.position().x()), min(20.0, max(-20.0, steps)))
+        event.accept()
 
     def mousePressEvent(self, event):
         if (event.button() == Qt.MouseButton.LeftButton and self.points
@@ -115,32 +137,36 @@ class OutputChart(QWidget):
         painter.setFont(QFont("Microsoft YaHei UI", 8))
         grid = QPen(QColor("#deebf2"), 1)
         for index in range(5):
-            y = bounds.bottom() - bounds.height() * index / 4
             x = bounds.left() + index * bounds.width() / 4
             painter.setPen(grid)
-            painter.drawLine(QPointF(bounds.left(), y), QPointF(bounds.right(), y))
             painter.drawLine(QPointF(x, bounds.top()), QPointF(x, bounds.bottom()))
             painter.setPen(MUTED)
-            label = time.strftime("%H:%M:%S", time.localtime(self.wall_offset + self.start + index * span / 4))
-            painter.drawText(QRectF(x - 32, bounds.bottom() + 4, 64, 19), CENTER, label)
+            instant = datetime.fromtimestamp(self.wall_offset + self.start + index * span / 4)
+            label = instant.strftime("%H:%M:%S")
+            if span < 10:
+                label += f".{instant.microsecond // 100000}"
+            painter.drawText(QRectF(x - 41, bounds.bottom() + 4, 82, 19), CENTER, label)
 
         for axis, (spec, tick, segments) in plot.items():
-            field, _, unit, color, _, _ = spec
+            field, name, unit, color, _, _ = spec
             color = QColor(color)
-            left = 0 if axis == 0 else bounds.right() + 3 + 43 * (axis - 1)
-            labels = QRectF(left, 7, 43, 18)
+            lane = self.series_rect(bounds, axis)
             painter.setPen(color)
-            painter.drawText(labels, CENTER, unit)
-            for index in range(5):
-                y = bounds.bottom() - bounds.height() * index / 4
-                labels.moveTop(y - 9)
-                painter.drawText(labels, CENTER, f"{tick * index:g}")
+            painter.drawText(QRectF(0, lane.center().y() - 9, AXIS_LABEL_WIDTH, 18),
+                             CENTER, f"{name} ({unit})")
+            for index in (0, 2, 4):
+                y = lane.bottom() - lane.height() * index / 4
+                painter.setPen(grid)
+                painter.drawLine(QPointF(lane.left(), y), QPointF(lane.right(), y))
+                painter.setPen(color)
+                painter.drawText(QRectF(AXIS_LABEL_WIDTH, y - 8, AXIS_TICK_WIDTH, 16),
+                                 AXIS_TICK_ALIGN, f"{tick * index:g}")
             painter.save()
-            painter.setClipRect(bounds.adjusted(-1, -1, 1, 1))
+            painter.setClipRect(lane.adjusted(-1, -1, 1, 1))
             stroke = QPen(color, 1.8)
             for points in segments:
-                coords = (QPointF(x_at(p.time), bounds.bottom() - getattr(p, field) / (4 * tick)
-                                  * bounds.height()) for p in points)
+                coords = (QPointF(x_at(p.time), lane.bottom() - getattr(p, field) / (4 * tick)
+                                  * lane.height()) for p in points)
                 first = next(coords)
                 path = QPainterPath(first)
                 last = first
@@ -154,7 +180,8 @@ class OutputChart(QWidget):
                 painter.drawEllipse(last, 2, 2)
             painter.restore()
 
-        if not any(segment[-1].time >= self.start for _, _, segments in plot.values() for segment in segments):
+        if not any(segment[-1].time >= self.start and segment[0].time <= self.end
+                   for _, _, segments in plot.values() for segment in segments):
             painter.setPen(MUTED)
             painter.drawText(bounds, CENTER, "暂无有效读数" if self.points else "开启输出后开始记录")
         region = self.selection
@@ -234,7 +261,7 @@ class HistoryPane(QWidget):
         self.history = history
         self.dialog = None
         self._displayed_view = None
-        self.snapshot = self.live_frame = self.selection = None
+        self.snapshot = self.live_frame = self.selection = self.zoom_window = None
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -283,6 +310,7 @@ class HistoryPane(QWidget):
         self.chart.selection_started.connect(self.freeze)
         self.chart.selection_changed.connect(self.select_range)
         self.chart.selection_cancelled.connect(self.cancel_drag)
+        self.chart.zoom_requested.connect(self.zoom_at)
         stats = QVBoxLayout()
         stats.setSpacing(6)
         self.scope = QLabel("实时统计")
@@ -327,6 +355,24 @@ class HistoryPane(QWidget):
         self.refresh_timer.start()
         self.refresh()
 
+    def zoom_at(self, anchor, steps):
+        frame = self.snapshot if self.snapshot is not None else self.live_frame
+        (earliest, latest, _, _), points, _ = frame
+        if not points:
+            return
+        start, end = self.zoom_window or (earliest, latest)
+        span = end - start
+        length = min(latest - earliest, max(1.0, span * (0.8 ** steps)))
+        if math.isclose(length, span, rel_tol=0, abs_tol=1e-6):
+            return
+        fraction = min(1.0, max(0.0, (anchor - start) / span))
+        left = max(earliest, min(latest - length, anchor - fraction * length))
+        self.freeze()
+        self.zoom_window = (left, left + length)
+        self.selection = None
+        self.chart.set_selection(None)
+        self.refresh()
+
     def freeze(self):
         if self.snapshot is None:
             self.snapshot = self.live_frame
@@ -339,11 +385,11 @@ class HistoryPane(QWidget):
         self.refresh()
 
     def cancel_drag(self):
-        if self.selection is None:
+        if self.selection is None and self.zoom_window is None:
             self.resume()
 
     def resume(self):
-        self.snapshot = self.selection = None
+        self.snapshot = self.selection = self.zoom_window = None
         self.chart.abandon_drag()
         self.chart.set_selection(None)
         self.minutes.setEnabled(True)
@@ -368,23 +414,33 @@ class HistoryPane(QWidget):
         (start, end, _, rate), points, wall_offset = frame
         field = self.view.currentData()
         previous = self._displayed_view
-        if previous is not None and previous[0] is frame and previous[1] == field:
-            if previous[2] == self.selection:
-                return
-        else:
+        if self.zoom_window is not None:
+            start, end = self.zoom_window
+        plot_changed = (previous is None or previous[0] is not frame
+                        or previous[1:3] != (field, self.zoom_window))
+        if not plot_changed and previous[3] == self.selection:
+            return
+        if self.zoom_window is not None:
+            # Keep one neighbor on each side for line clipping and weighted averages.
+            by_time = attrgetter("time")
+            first = max(0, bisect_left(points, start, key=by_time) - 1)
+            last = bisect_right(points, end, key=by_time) + 1
+            points = points[first:last]
+        if plot_changed:
             self.chart.set_data(points, start, end, field, wall_offset)
-        self._displayed_view = (frame, field, self.selection)
+        self._displayed_view = (frame, field, self.zoom_window, self.selection)
         interval = 1500 if len(points) > 30000 else 500
         if self.refresh_timer.interval() != interval:
             self.refresh_timer.setInterval(interval)
 
         a, b = self.selection or (start, end)
-        self.scope.setText("框选统计" if self.selection else "实时统计")
+        self.scope.setText("框选统计" if self.selection else "缩放统计" if self.zoom_window else "实时统计")
         time_label = "—"
         if points:
-            fmt = "%H:%M:%S.%f" if self.selection else "%H:%M:%S"
+            precise = self.selection is not None or self.zoom_window is not None
+            fmt = "%H:%M:%S.%f" if precise else "%H:%M:%S"
             labels = [datetime.fromtimestamp(wall_offset + t).strftime(fmt) for t in (a, b)]
-            if self.selection:
+            if precise:
                 labels = [label[:-3] for label in labels]
             time_label = " 至\n".join(labels)
         self.range_text.setText(time_label)
@@ -396,7 +452,7 @@ class HistoryPane(QWidget):
             self.values[key].setText(f"— {unit}" if value is None else f"{value:.{digits}f} {unit}")
         average = summary.average
         coverage = f"{average.samples} 个样本 · 有效 {average.seconds:.1f} 秒"
-        if rate is not None and not self.selection:
+        if rate is not None and not self.selection and not self.zoom_window:
             coverage += f"\n实际 {rate:.1f} Hz"
         self.coverage.setText(coverage)
 
@@ -435,11 +491,15 @@ class HistoryPane(QWidget):
         pane = HistoryPane(self.history, standalone=True)
         pane.minutes.setValue(self.minutes.value())
         pane.view.setCurrentIndex(self.view.currentIndex())
-        if self.selection is not None:
+        if self.snapshot is not None:
             pane.snapshot = self.snapshot
+            pane.zoom_window = self.zoom_window
             pane.minutes.setEnabled(False)
             pane.resume_button.setEnabled(True)
-            pane.select_range(*self.selection)
+            if self.selection is not None:
+                pane.select_range(*self.selection)
+            else:
+                pane.refresh()
         layout.addWidget(pane)
         self.dialog.finished.connect(self.window_closed)
         self.dialog.show()
