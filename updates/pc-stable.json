@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.6",
+    "version": "1.0.7",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.6/PowerModule-PC.exe",
-    "sha256": "f81515934c4b077202b4f5d53a7636255d3c305268644aeb69083f08e23983ac",
-    "size": 38687149,
-    "notes": "新增 USB 固件诊断日志导出，需 ESP32 固件 1.2.4。保留 PowerModule-PC.exe 文件名与桌面快捷方式。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.7/PowerModule-PC.exe",
+    "sha256": "f94eac5a1178f3aada422ab1dbf7f0566d6a352fd5ee46a4ee2da4ce5b5dd523",
+    "size": 38692045,
+    "notes": "电压、电流和功率同图显示，支持框选冻结及区间统计；USB 有线仅列出 CH340。保留原桌面快捷方式。"
   }
 }
