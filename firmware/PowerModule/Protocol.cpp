@@ -39,6 +39,13 @@ bool canonicalCopy(JsonVariantConst source, JsonVariant destination, bool root =
         }
         return true;
     }
+    if (source.is<JsonArrayConst>()) {
+        auto array = destination.to<JsonArray>();
+        for (JsonVariantConst item : source.as<JsonArrayConst>()) {
+            if (!canonicalCopy(item, array.add<JsonVariant>())) return false;
+        }
+        return true;
+    }
     // The protocol uses integers, booleans, strings and null.
     if (source.isNull() || source.is<bool>() || source.is<uint32_t>() ||
         source.is<int32_t>() || source.is<const char*>()) {

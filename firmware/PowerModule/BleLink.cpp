@@ -79,6 +79,7 @@ void BleLink::onConnect(NimBLEServer* server, NimBLEConnInfo& info) {
         server->disconnect(handle);
         return;
     }
+    diagnostics_.append(millis(), DiagEvent::Connect, handle);
     secure_.store(false);
     rspSubscribed_.store(false);
     stateSubscribed_.store(false);
@@ -88,10 +89,14 @@ void BleLink::onConnect(NimBLEServer* server, NimBLEConnInfo& info) {
     nextGeneration_ = (nextGeneration_ + 1) & (UINT32_MAX >> kReasonBits);
     if (!nextGeneration_) ++nextGeneration_;
     generation_.store(nextGeneration_);
-    NimBLEDevice::startSecurity(handle);
+    int rc = 0;
+    if (!NimBLEDevice::startSecurity(handle, &rc)) {
+        diagnostics_.append(millis(), DiagEvent::SecurityStartFailed, handle, rc);
+    }
 }
 
 void BleLink::onDisconnect(NimBLEServer*, NimBLEConnInfo& info, int reason) {
+    diagnostics_.append(millis(), DiagEvent::GapDisconnect, info.getConnHandle(), reason);
     ESP_LOGI(kBleLog, "GAP disconnect handle=%u reason=%d",
              unsigned(info.getConnHandle()), reason);
     if (info.getConnHandle() == handle_.load()) clearConnection();
@@ -107,7 +112,10 @@ void BleLink::clearConnection() {
 void BleLink::onAuthenticationComplete(NimBLEConnInfo& info) {
     const auto session = generation();
     if (info.getConnHandle() != handle_.load() || !session) return;
-    if (!info.isEncrypted() || !info.isAuthenticated() || !info.isBonded()) {
+    const int mask = (info.isEncrypted() ? 1 : 0) | (info.isAuthenticated() ? 2 : 0) |
+                     (info.isBonded() ? 4 : 0);
+    diagnostics_.append(millis(), DiagEvent::Authentication, info.getConnHandle(), mask);
+    if (mask != 7) {
         requestDisconnect(session, CloseReason::SecurityRejected);
         return;
     }
@@ -155,7 +163,10 @@ void BleLink::requestDisconnect(uint32_t session, CloseReason reason) {
     const auto request = (session << kReasonBits) | static_cast<uint32_t>(reason);
     auto current = closeRequest_.load();
     while (generation_.load() == session && (current >> kReasonBits) != session) {
-        if (closeRequest_.compare_exchange_weak(current, request)) return;
+        if (closeRequest_.compare_exchange_weak(current, request)) {
+            diagnostics_.append(millis(), DiagEvent::DisconnectRequested, static_cast<int32_t>(reason), session);
+            return;
+        }
     }
 }
 
@@ -186,6 +197,7 @@ void BleLink::recover() {
         void retryDisconnect() {
             const int rc = ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
             if (request != owner.loggedRequest_ || rc != owner.loggedResult_) {
+                owner.diagnostics_.append(millis(), DiagEvent::Termination, request & kReasonMask, rc);
                 ESP_LOGI(kBleLog, "terminate handle=%u cause=%u rc=%d",
                          unsigned(handle), unsigned(request & kReasonMask), rc);
                 owner.loggedRequest_ = request;
@@ -193,8 +205,9 @@ void BleLink::recover() {
             }
         }
         void forgetMissingPeer() {
-            ESP_LOGW(kBleLog, "clearing stale handle=%u cause=%u",
-                     unsigned(handle), unsigned(closing() ? request & kReasonMask : 0));
+            const auto cause = closing() ? request & kReasonMask : 0;
+            owner.diagnostics_.append(millis(), DiagEvent::StaleHandle, handle, cause);
+            ESP_LOGW(kBleLog, "clearing stale handle=%u cause=%u", unsigned(handle), unsigned(cause));
             owner.clearConnection();
         }
         bool anyPeer() {
@@ -211,6 +224,9 @@ void BleLink::recover() {
             const bool active = advertising->isAdvertising();
             if (!active) {
                 const bool started = advertising->start();
+                if (started || !owner.advertisingFailed_) {
+                    owner.diagnostics_.append(millis(), DiagEvent::AdvertisingRetry, started);
+                }
                 if (started) ESP_LOGI(kBleLog, "advertising recovered");
                 else if (!owner.advertisingFailed_) ESP_LOGW(kBleLog, "advertising restart failed; will retry");
                 owner.advertisingFailed_ = !started;

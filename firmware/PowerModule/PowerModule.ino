@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <driver/gpio.h>
 #include <esp_mac.h>
+#include <esp_random.h>
+#include <esp_system.h>
 #include "BleLink.h"
 #include "Controller.h"
 
@@ -10,13 +12,17 @@ using namespace pm;
 
 bool serviceLinks();
 void sendReply(Link link, Message message, uint32_t bleGeneration);
+void sendDiagnostic(Message message);
 
 Preferences storage;
-BleLink ble;
+DiagnosticLog diagnostics;
+BleLink ble(diagnostics);
 Sx150 sx(Serial2, serviceLinks);
-Controller controller(sx, storage, sendReply, [](unsigned& count) { return ble.clearBonds(count); });
+Controller controller(sx, storage, sendReply, [](unsigned& count) { return ble.clearBonds(count); },
+                      diagnostics, sendDiagnostic);
 LineReader usbInput;
 Outbox usbReplies;
+Message usbDiagnostic;
 Message usbTx;
 size_t usbOffset = 0;
 uint32_t lastUsbChunk = 0;
@@ -60,12 +66,19 @@ void sendReply(Link link, Message message, uint32_t generation) {
     }
 }
 
+void sendDiagnostic(Message message) {
+    // Diagnostics use one low-priority slot, never the regular control queue.
+    if (usbDiagnostic.empty()) usbDiagnostic = std::move(message);
+}
+
 void pumpUsbTx() {
     if (usbTx.empty()) {
         usbOffset = 0;
         if (!usbReplies.empty()) {
             usbTx = usbReplies.front();
             usbReplies.pop();
+        } else if (!usbDiagnostic.empty()) {
+            usbTx.swap(usbDiagnostic);
         } else if (usbSeen && !controller.streamsPaused() && usbStream.ready(Link::Usb)) {
             usbTx = controller.stateMessage();
         }
@@ -166,6 +179,7 @@ void setup() {
         digitalWrite(pin, LOW);
     }
     Serial.begin(115200);
+    diagnostics.begin(esp_random(), millis(), static_cast<int32_t>(esp_reset_reason()));
     if (!storage.begin("power-module", false)) Serial.println("NVS_ERROR");
     const uint32_t uart = storage.getUInt("sx_uart", kDefaultSxAddress);
     const uint8_t address = uint8_t(uart) ? uint8_t(uart) : kDefaultSxAddress;
@@ -187,6 +201,7 @@ void setup() {
     controller.begin(deviceId, baud, address);
     controller.tick();  // Attempt and read back SX OFF before advertising.
     const bool bleReady = ble.begin(name, controller.infoMessage());
+    diagnostics.append(millis(), DiagEvent::AdvertisingInitial, bleReady);
     linksReady = true;
     Serial.printf("%s firmware %s, SX %u/%u, BLE %s\n",
                   name, kFirmware, unsigned(address), baud, bleReady ? "ready" : "unavailable");

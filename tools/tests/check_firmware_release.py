@@ -24,6 +24,22 @@ for label, fixture in fixtures.items():
     else:
         assert line == old and reply["applied"]["enabled"] is False
 
+# USB in 1.2.4 adds a capability without changing old client framing. In
+# particular, an oversized full response must still preserve the capability.
+if version == "1.2.4":
+    for fixture in fixtures.values():
+        usb_caps = {
+            **fixture["data"],
+            "firmware": version,
+            "diag_log": True,
+            "clear_ble_bonds": True,
+        }
+        request = json.dumps({**fixture, "data": usb_caps}).encode()
+        bounded = subprocess.check_output([encoder], input=request)
+        assert 0 < len(bounded) <= 1024
+        (reply,) = map(decode, Lines().feed(bounded))
+        assert reply["data"] == usb_caps and reply["id"] == fixture["id"]
+
 image = FirmwareImage.load(binary)
 assert image.version == version
 stable = dict(version=version, target="PowerModule-ESP32", protocol=1,

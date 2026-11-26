@@ -1,4 +1,5 @@
 #include "Controller.h"
+#include "DiagnosticProtocol.h"
 #include <algorithm>
 #include <cstring>
 #include <string_view>
@@ -77,7 +78,12 @@ void Controller::receive(Link link, const Message& line) {
         fillInfo(data.to<JsonObject>());
         data["stream_period_ms"] = streamMs(link);
         data["min_stream_period_ms"] = minStreamMs(link);
+        if (link == Link::Usb) data["diag_log"] = true;
         send(link, id, nullptr, &data);
+        return;
+    }
+    if (op == "diag_info" || op == "diag_read") {
+        diagnose(link, id, op == "diag_read", args);
         return;
     }
     if (op == "get_state") {
@@ -274,6 +280,53 @@ void Controller::receive(Link link, const Message& line) {
         return;
     }
     pending_ = std::move(request);
+}
+
+void Controller::diagnose(Link link, uint32_t id, bool read, JsonObjectConst args) {
+    if (link != Link::Usb) {
+        send(link, id, "USB_ONLY");
+        return;
+    }
+    const auto respond = [this, id](const char* error, const JsonDocument* data = nullptr) {
+        Message line = encodeDiagReply(id, error, data);
+        if (line.empty()) line = encodeDiagReply(id, "DIAG_INTERNAL");
+        diagnosticReply_(std::move(line));
+    };
+    if (update_.locksOutputs() || updateRequest_ || processingUpdate_) {
+        respond("OTA_BUSY");
+        return;
+    }
+    const uint32_t now = millis();
+    if ((lastDiagAt_ && now - *lastDiagAt_ < 100) || pending_ || running_ || stopReply_) {
+        respond("DIAG_BUSY");
+        return;
+    }
+    lastDiagAt_ = now;
+    JsonDocument data;
+    if (!read) {
+        if (args.size()) {
+            respond("BAD_ARGS");
+            return;
+        }
+        fillDiagInfo(data.to<JsonObject>(), diagnostics_.bootId(), diagnostics_.range());
+    } else {
+        if (args.size() != 3 || !args["boot_id"].is<uint32_t>() ||
+            !args["from"].is<uint32_t>() || !args["until"].is<uint32_t>()) {
+            respond("BAD_ARGS");
+            return;
+        }
+        if (args["boot_id"].as<uint32_t>() != diagnostics_.bootId()) {
+            respond("DIAG_RESTARTED");
+            return;
+        }
+        DiagnosticRing::Page page;
+        if (!diagnostics_.read(args["from"].as<uint32_t>(), args["until"].as<uint32_t>(), page)) {
+            respond("BAD_ARGS");
+            return;
+        }
+        fillDiagPage(data.to<JsonObject>(), page);
+    }
+    respond(nullptr, &data);
 }
 
 void Controller::finish(Request& request, const char* code, const JsonDocument* data) {

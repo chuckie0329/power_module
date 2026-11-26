@@ -9,12 +9,14 @@
 #endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include "DiagnosticLog.h"
 #include "Protocol.h"
 
 namespace pm {
 
 class BleLink final : private NimBLEServerCallbacks, private NimBLECharacteristicCallbacks {
 public:
+    explicit BleLink(DiagnosticLog& diagnostics) : diagnostics_(diagnostics) {}
     bool begin(const char* name, const Message& info);
     void tick(bool allowAdvertisingRecovery);
     const char* clearBonds(unsigned& cleared);
@@ -62,6 +64,7 @@ private:
     size_t fragment(SendCursor& cursor, const Message& message, uint8_t* frame);
     bool advance(SendCursor& cursor, const Message& message);
 
+    DiagnosticLog& diagnostics_;
     bool ready_ = false;
     NimBLEServer* server_ = nullptr;
     NimBLECharacteristic* rsp_ = nullptr;

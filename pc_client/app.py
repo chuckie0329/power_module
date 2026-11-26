@@ -4,7 +4,7 @@ import sys
 from threading import Event
 import time
 
-from PySide6.QtCore import QLocale, QSettings, QSignalBlocker, Qt, QTimer, Slot
+from PySide6.QtCore import QIODevice, QLocale, QSaveFile, QSettings, QSignalBlocker, Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from pc_client.chart import HistoryPane
 from pc_client.connection import BleLink, LinkWorker, firmware_version, retains_outputs, usb_ports
+from pc_client.diagnostics import ACTION as DIAGNOSTIC_ACTION, serialize as serialize_diagnostics
 from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
 from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
@@ -66,6 +67,11 @@ ERRORS = {
     "USB_ONLY": "只能通过 USB 清除设备端蓝牙配对。",
     "BLE_BONDS_FAILED": "配对没有全部清除。可能已有部分条目被清除，请核对后再试。",
     "BLE_ADVERTISING_FAILED": "配对已清除，但设备端蓝牙广播未恢复。请保持输出关闭，确认安全后再手动重启设备。",
+    "DIAG_USB": "请通过 USB 有线连接设备后导出诊断日志。",
+    "DIAG_UNSUPPORTED": "当前设备固件不支持 USB 诊断。请先升级 ESP32 固件。",
+    "DIAG_PROTOCOL": "设备返回的诊断日志格式不兼容。",
+    "DIAG_BUSY": "设备正忙，未能读取诊断日志。请稍后重试。",
+    "DIAG_RESTARTED": "读取期间设备已重启。请重新导出当前开机的日志。",
     "OTA_BAD_IMAGE": "请选择校验通过的 PowerModule ESP32 应用固件（.bin）。",
     "OTA_NO_SLOT": "设备没有能容纳此固件的备用应用分区。",
     "OTA_OUTPUT": "请确认主输出和两路继电器均已关闭，再进行升级。",
@@ -182,6 +188,7 @@ class Window(QMainWindow):
         self.tray = None
         self.hidden_chart_dialog = None
         self.update_dialog = None
+        self.diagnostic_path = None
         self.pc_handoff = False
         self.saved_pc_resume = None
         self.connect_target = None
@@ -272,6 +279,9 @@ class Window(QMainWindow):
         row.addWidget(self.update_button)
         self.bond_button = button("清除蓝牙配对", self.clear_ble_bonds)
         row.addWidget(self.bond_button)
+        self.diagnostic_button = button("诊断", self.export_diagnostics)
+        self.diagnostic_button.setAccessibleName("导出固件诊断日志")
+        row.addWidget(self.diagnostic_button)
         self.float_button = button("悬浮", self.show_floating)
         row.addWidget(self.float_button)
         header.addLayout(row)
@@ -634,6 +644,52 @@ class Window(QMainWindow):
         self.launch("清除蓝牙配对", self.worker.client.call(
             "clear_ble_bonds", {"device_id": device, "confirm_all": True}))
 
+    def diagnostic_status(self):
+        if self.kind != "usb" or not self.info:
+            return ERRORS["DIAG_USB"]
+        if self.info.get("diag_log") is not True:
+            return ERRORS["DIAG_UNSUPPORTED"]
+        if self.jobs or self.pc_handoff or self.exit_requested:
+            return "请等待当前设备操作完成。"
+        return ""
+
+    def export_diagnostics(self):
+        if problem := self.diagnostic_status():
+            self.announce(problem, True)
+            return
+        device = self.info.get("device_id")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出固件诊断日志", "PowerModule-Diagnostics.json", "JSON 日志 (*.json)")
+        if not path:
+            return
+        if problem := self.diagnostic_status():
+            self.announce(problem, True)
+            return
+        if self.info.get("device_id") != device:
+            self.announce("当前连接的设备已改变，请重新导出。", True)
+            return
+        self.diagnostic_path = path
+        self.announce("正在读取 ESP32 诊断日志…")
+        self.launch(DIAGNOSTIC_ACTION, self.worker.client.read_diagnostics())
+
+    def save_diagnostics(self, result):
+        snapshot, firmware = result
+        payload = serialize_diagnostics(snapshot, firmware, PC_VERSION)
+        file = QSaveFile(self.diagnostic_path)
+        if not file.open(QIODevice.OpenModeFlag.WriteOnly):
+            self.announce("无法打开诊断日志保存位置。", True)
+            return
+        if file.write(payload) != len(payload):
+            file.cancelWriting()
+            self.announce("无法完整保存诊断日志。", True)
+            return
+        if not file.commit():
+            self.announce("无法保存诊断日志。", True)
+            return
+        lost = snapshot["overwritten_before_read"] + snapshot["overwritten_during_read"]
+        detail = f"；另有 {lost} 条较早的记录已被覆盖" if lost else ""
+        self.announce(f"已导出 {len(snapshot['events'])} 条诊断记录{detail}。")
+
     def firmware_upgrade_allowed(self):
         return bool(not self.pc_handoff and not self.jobs and firmware_version(self.info) >= MIN_FIRMWARE_VERSION)
 
@@ -790,6 +846,14 @@ class Window(QMainWindow):
     @Slot(str, object, str)
     def finished(self, action, result, error):
         self.jobs.discard(action)
+        if action == DIAGNOSTIC_ACTION:
+            if error:
+                self.announce(error_text(error), True)
+            elif not self.exit_requested:
+                self.save_diagnostics(result)
+            self.diagnostic_path = None
+            self.render()
+            return
         if action == "清除蓝牙配对":
             if error:
                 self.announce(error_text(error), True)
@@ -994,7 +1058,7 @@ class Window(QMainWindow):
         applied = self.state.get("applied", {}) if active else {}
         fault = self.state.get("fault", {}).get("code") if active else None
         enabled = applied.get("enabled") if fresh else None
-        busy = bool(self.jobs)
+        busy = bool(self.jobs - {DIAGNOSTIC_ACTION})
         link_pending = bool(self.jobs & {"scan", "connect", "disconnect", "固件升级"})
         link_pending = link_pending or self.pc_handoff
         self.transport.setEnabled(not connected and not link_pending)
@@ -1007,6 +1071,9 @@ class Window(QMainWindow):
         bond_problem = self.bond_recovery_status()
         self.bond_button.setEnabled(not bond_problem)
         self.bond_button.setToolTip(bond_problem or "仅清除此 ESP32 保存的全部蓝牙配对。")
+        diagnostic_problem = self.diagnostic_status()
+        self.diagnostic_button.setEnabled(not diagnostic_problem)
+        self.diagnostic_button.setToolTip(diagnostic_problem or "通过 USB 将固件诊断日志保存到本地。")
         if self.update_dialog is not None:
             self.update_dialog._render()
         direct = bool(self.info.get("direct_control"))

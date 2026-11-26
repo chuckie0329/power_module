@@ -2,6 +2,7 @@
 
 #include <Preferences.h>
 #include <optional>
+#include "DiagnosticLog.h"
 #include "FirmwareUpdate.h"
 #include "Protocol.h"
 #include "Sx150.h"
@@ -10,11 +11,14 @@ namespace pm {
 
 using ReplySink = void (*)(Link, Message, uint32_t);
 using BondClear = const char* (*)(unsigned&);
+using DiagnosticSink = void (*)(Message);
 
 class Controller {
 public:
-    Controller(Sx150& sx, Preferences& preferences, ReplySink reply, BondClear clearBonds = nullptr)
-        : sx_(sx), preferences_(preferences), reply_(reply), clearBonds_(clearBonds) {}
+    Controller(Sx150& sx, Preferences& preferences, ReplySink reply, BondClear clearBonds,
+               DiagnosticLog& diagnostics, DiagnosticSink diagnosticReply)
+        : sx_(sx), preferences_(preferences), reply_(reply), clearBonds_(clearBonds),
+          diagnostics_(diagnostics), diagnosticReply_(diagnosticReply) {}
 
     void begin(const char* name, unsigned sxBaud, uint8_t sxAddress);
     void bleChanged(uint32_t generation, uint16_t minPeriod);
@@ -67,6 +71,7 @@ private:
         std::array<Cached, 6> cache;
     };
 
+    void diagnose(Link link, uint32_t id, bool read, JsonObjectConst args);
     void requestStop(bool releaseRelays);
     void processStop();
     void runRequest();
@@ -104,6 +109,9 @@ private:
     Preferences& preferences_;
     ReplySink reply_;
     BondClear clearBonds_;
+    DiagnosticLog& diagnostics_;
+    DiagnosticSink diagnosticReply_;
+    std::optional<uint32_t> lastDiagAt_;
     Message name_;
     unsigned sxBaud_ = kDefaultSxBaud;
     uint8_t sxAddress_ = kDefaultSxAddress;

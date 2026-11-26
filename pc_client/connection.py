@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, Signal
 import serial
 from serial.tools import list_ports
 
+from pc_client.diagnostics import InvalidDiagnosticReply, read_snapshot
 from pc_client.protocol import (
     COMMAND, HEARTBEAT, RESPONSE, SERVICE, STATE, VERSION,
     Fragments, Lines, decode, encode, fragments,
@@ -261,6 +262,7 @@ class Client:
         self.time_received = 0.0
         self.closing = False
         self.updating = False
+        self.diagnosing = False
 
     async def connect(self, mode, target, expected_device=None, *, allow_pairing=False):
         if self.link:
@@ -393,8 +395,44 @@ class Client:
             raise DeviceError("FIRMWARE_UPDATE")
         return await self.call(operation, args, revision)
 
+    async def read_diagnostics(self):
+        if not self.ready or self.link is None or self.link.name != "usb":
+            raise DeviceError("DIAG_USB")
+        if self.info.get("diag_log") is not True:
+            raise DeviceError("DIAG_UNSUPPORTED")
+        if self.updating or self.diagnosing:
+            raise DeviceError("BUSY")
+        link = self.link
+        firmware = self.info.get("firmware", "")
+        self.diagnosing = True
+        try:
+            async def read(op, args):
+                for _ in range(5):
+                    # Limit serial bandwidth use and give control traffic priority.
+                    await asyncio.sleep(0.12)
+                    if self.link is not link or not self.ready or self.closing:
+                        raise DeviceError("LINK_ERROR")
+                    if self.pending:
+                        continue
+                    try:
+                        reply = await self.call(op, args)
+                    except DeviceError as error:
+                        if error.code == "DIAG_BUSY":
+                            continue
+                        raise
+                    if self.link is not link or not self.ready or self.closing:
+                        raise DeviceError("LINK_ERROR")
+                    return reply
+                raise DeviceError("DIAG_BUSY")
+
+            return await read_snapshot(read), firmware
+        except InvalidDiagnosticReply as error:
+            raise DeviceError("DIAG_PROTOCOL") from error
+        finally:
+            self.diagnosing = False
+
     async def update_firmware(self, image, cancelled):
-        if not self.ready or self.updating:
+        if not self.ready or self.updating or self.diagnosing:
             raise DeviceError("BUSY")
         link = self.link
         mode = link.name
