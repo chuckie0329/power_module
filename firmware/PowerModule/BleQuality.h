@@ -22,10 +22,16 @@ public:
         haveRssi_ = true;
     }
 
-    void txFailed(uint32_t session, bool indication) {
-        if (!session || session != session_) return;
-        auto& count = indication ? indicateFailures_ : notifyFailures_;
-        if (count < INT32_MAX) ++count;
+    void indicateFailed(uint32_t session) {
+        if (session && session == session_ && indicateFailures_ < INT32_MAX) ++indicateFailures_;
+    }
+
+    void notifyFailed(uint32_t session, uint32_t when, int32_t rc) {
+        if (!session || session != session_ || rc == 0) return;
+        const Failure failure{when, rc};
+        if (!notifyFailures_) firstNotifyFailure_ = failure;
+        lastNotifyFailure_ = failure;
+        if (notifyFailures_ < INT32_MAX) ++notifyFailures_;
     }
 
     void finish() { session_ = 0; }
@@ -39,9 +45,21 @@ public:
         const auto packed = int32_t(latency & 0x7fffu) * 65536 + timeout;
         sink(DiagEvent::BleConnectionParameters, interval, packed);
         sink(DiagEvent::BleTxFailures, notifyFailures_, indicateFailures_);
+        if (notifyFailures_) {
+            sink(DiagEvent::BleNotifyFirstFailure, firstNotifyFailure_.rc, ageMs(now, firstNotifyFailure_.at));
+            sink(DiagEvent::BleNotifyLastFailure, lastNotifyFailure_.rc, ageMs(now, lastNotifyFailure_.at));
+        }
     }
 
 private:
+    struct Failure { uint32_t at; int32_t rc; };
+
+    static int32_t ageMs(uint32_t now, uint32_t then) {
+        const uint32_t age = now - then;  // millis() wraps.
+        return age <= INT32_MAX ? static_cast<int32_t>(age) : -1;
+    }
+
+    Failure firstNotifyFailure_{}, lastNotifyFailure_{};
     uint32_t session_ = 0;
     uint32_t rssiAt_ = 0;
     int32_t notifyFailures_ = 0;

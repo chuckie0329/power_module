@@ -9,6 +9,14 @@ namespace pm {
 namespace {
 constexpr char kBleLog[] = "pm-ble";
 constexpr uint32_t kRssiPeriodMs = 2000;
+
+// Match NimBLECharacteristic::notify(value, length, connHandle) in the
+// pinned NimBLE-Arduino 2.3.8, but retain the host return code. The notify
+// API consumes the mbuf even on failure; do not free or resubmit it here.
+int notifyWithResult(uint16_t connHandle, uint16_t attribute, const uint8_t* value, size_t length) {
+    auto* packet = ble_hs_mbuf_from_flat(value, length);
+    return packet ? ble_gattc_notify_custom(connHandle, attribute, packet) : BLE_HS_ENOMEM;
+}
 }
 
 
@@ -338,9 +346,15 @@ bool BleLink::advance(SendCursor& cursor, const Message& message) {
     return size_t(++cursor.index) * cursor.stride >= message.size();
 }
 
-void BleLink::noteTxFailure(uint32_t generation, bool indication) {
+void BleLink::noteIndicationFailure(uint32_t generation) {
     portENTER_CRITICAL(&bleQualityLock_);
-    bleQuality_.txFailed(generation, indication);
+    bleQuality_.indicateFailed(generation);
+    portEXIT_CRITICAL(&bleQualityLock_);
+}
+
+void BleLink::noteNotificationFailure(uint32_t generation, uint32_t when, int rc) {
+    portENTER_CRITICAL(&bleQualityLock_);
+    bleQuality_.notifyFailed(generation, when, rc);
     portEXIT_CRITICAL(&bleQualityLock_);
 }
 
@@ -354,7 +368,7 @@ void BleLink::sendOne(uint32_t now, uint32_t generation) {
         const int status = indicationStatus_.exchange(0);
         if (status == 0 && !due(now, indicateUntil_)) return;
         if (status != 1) {
-            noteTxFailure(generation, true);
+            noteIndicationFailure(generation);
             requestDisconnect(generation, status ? CloseReason::IndicationFailed : CloseReason::IndicationTimeout);
             return;
         }
@@ -374,7 +388,7 @@ void BleLink::sendOne(uint32_t now, uint32_t generation) {
         const size_t size = fragment(replyCursor_, replies_.front(), frame);
         indicationStatus_.store(0);
         if (!rsp_->indicate(frame, size, handle)) {
-            noteTxFailure(generation, true);
+            noteIndicationFailure(generation);
             requestDisconnect(generation, CloseReason::IndicationFailed);
             return;
         }
@@ -383,8 +397,9 @@ void BleLink::sendOne(uint32_t now, uint32_t generation) {
     } else if (!stateMessage_.empty() && due(now, nextNotify_)) {
         const size_t size = fragment(stateCursor_, stateMessage_, frame);
         nextNotify_ = now + (mtu_.load() >= kFastBleMtu ? 10 : 20);
-        if (!state_->notify(frame, size, handle)) {
-            noteTxFailure(generation, false);
+        const int rc = notifyWithResult(handle, state_->getHandle(), frame, size);
+        if (rc != 0) {
+            noteNotificationFailure(generation, millis(), rc);
         } else if (advance(stateCursor_, stateMessage_)) {
             stateMessage_.clear();
         }

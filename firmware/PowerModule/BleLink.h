@@ -58,7 +58,8 @@ private:
     void clearConnection();
     static void runRecovery(ble_npl_event* event);
     void recover();
-    void noteTxFailure(uint32_t generation, bool indication);
+    void noteIndicationFailure(uint32_t generation);
+    void noteNotificationFailure(uint32_t generation, uint32_t when, int rc);
     static constexpr uint32_t kReasonBits = 3;
     static constexpr uint32_t kReasonMask = (1u << kReasonBits) - 1;
     static constexpr uint32_t kRecoveryPeriodMs = 500;

@@ -24,9 +24,9 @@ static void emitFixture() {
     BleQuality quality;
     quality.begin(1);
     quality.sample(2020, -66);
-    quality.txFailed(1, false);
-    quality.txFailed(1, false);
-    quality.txFailed(1, true);
+    quality.notifyFailed(1, 2100, 6);
+    quality.notifyFailed(1, 2370, 7);
+    quality.indicateFailed(1);
     quality.summarize(2400, 24, 2, 600, [&](DiagEvent code, int32_t a, int32_t b) {
         ring.append(2400, code, a, b);
     });
@@ -57,22 +57,29 @@ int main(int argc, char** argv) {
     quality.begin(2);
     quality.sample(UINT32_MAX - 9, -80);
     quality.sample(4, 127);
-    quality.txFailed(1, false);
-    quality.txFailed(2, true);
+    quality.notifyFailed(1, 4, 8);  // Old session: ignored.
+    quality.notifyFailed(2, 4, 0);  // Success: ignored.
+    quality.notifyFailed(2, UINT32_MAX - 4, 6);
+    quality.notifyFailed(2, 8, 7);
+    quality.indicateFailed(2);
     quality.finish();
-    quality.txFailed(2, true);
+    quality.indicateFailed(2);
+    quality.notifyFailed(2, 9, 8);  // Closed session: ignored.
     unsigned summaries = 0;
     quality.summarize(10, 24, 3, 600, [&](DiagEvent code, int32_t a, int32_t b) {
         ++summaries;
         if (code == DiagEvent::BleLastRssi) assert(a == -80 && b == 20);
         else if (code == DiagEvent::BleConnectionParameters) assert(a == 24 && b == 3 * 65536 + 600);
-        else { assert(code == DiagEvent::BleTxFailures && a == 0 && b == 1); }
+        else if (code == DiagEvent::BleTxFailures) assert(a == 2 && b == 1);
+        else if (code == DiagEvent::BleNotifyFirstFailure) assert(a == 6 && b == 15);
+        else { assert(code == DiagEvent::BleNotifyLastFailure && a == 7 && b == 2); }
     });
-    assert(summaries == 3);
+    assert(summaries == 5);
     quality.begin(3);
     quality.summarize(50, 12, 0, 200, [](DiagEvent code, int32_t a, int32_t b) {
         if (code == DiagEvent::BleLastRssi) assert(a == 127 && b == -1);
         if (code == DiagEvent::BleTxFailures) assert(a == 0 && b == 0);
+        assert(code != DiagEvent::BleNotifyFirstFailure && code != DiagEvent::BleNotifyLastFailure);
     });
     DiagnosticRing ring;
     DiagnosticRing::Page page;

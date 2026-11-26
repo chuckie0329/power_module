@@ -48,8 +48,12 @@ def main(encoder):
     assert (params["interval_ms"], params["peripheral_latency"], params["supervision_timeout_ms"]) == (30, 2, 6000)
     assert (failures["notification_failures"], failures["indication_failures"]) == (2, 1)
     assert drop["gap_reason"] == 520 and {row["uptime_ms"] for row in (rssi, params, failures, drop)} == {2400}
-    parsed = json.loads(serialize(snapshot, "1.2.5", "1.0.10"))
-    assert parsed["events"] == snapshot["events"] and parsed["firmware"] == "1.2.5"
+    # The released 1.0.10 client intentionally treats the additive codes as raw.
+    raw = [(row["code"], row["a"], row["b"], row["uptime_ms"]) for row in snapshot["events"]
+           if row["event"] == "unknown"]
+    assert raw == [(14, 6, 300, 2400), (15, 7, 30, 2400)]
+    parsed = json.loads(serialize(snapshot, "1.2.6", "1.0.10"))
+    assert parsed["events"] == snapshot["events"] and parsed["firmware"] == "1.2.6"
     print(f"Firmware → USB CRC frames → client JSON: {len(snapshot['events'])} events")
 
 
