@@ -15,7 +15,7 @@
 - **悬浮与托盘**：半透明置顶小窗显示实时读数和开关，主窗口收起后可从系统托盘恢复。
 - **诊断与升级**：通过 USB 导出固件诊断日志，无需拆外壳。Windows 客户端和 ESP32 固件可分别检查更新。
 
-> 「停止」时序只取消后续动作，不会自动关闭主输出或释放继电器。固件 v1.2.1 起，断开连接也不会自动关断。
+> 点击「停止」只取消后续动作，不会自动关闭主输出或释放继电器。固件 v1.2.1 起，断开连接也不会自动关断。
 
 ## 下载
 
@@ -26,6 +26,19 @@
 | [ESP32 固件 v1.2.6 · PowerModule-ESP32.hex](https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.hex) | 通过 UART0 下载口烧录 |
 
 [全部发布](https://github.com/chuckie0329/power_module/releases) · [客户端使用说明](pc_client/README.md) · [固件与烧录说明](firmware/README.md) · [硬件接线表](docs/简化硬件接线表.md)
+
+## 模块与配件采购
+
+以下为 [MakerWorld 外壳项目](https://makerworld.com.cn/zh/models/3324172-sx150c-type-c-ke-diao-zhi-liu-dian-yuan-wai-ke#profileId-3930826) 列出的淘宝原链接。选购时可对照[模块规格与尺寸](modules/README.md)。
+
+| 模块或配件 | 淘宝 |
+| --- | --- |
+| SX150C 数控升降压电源模块 | [商品链接](https://item.taobao.com/item.htm?id=862021442751) |
+| ESP32-WROOM-32E 双路继电器板（5–60 V 供电版） | [商品链接](https://item.taobao.com/item.htm?id=672666360807) |
+| Mini PD3.1 Type-C 诱骗模块 | [商品链接](https://item.taobao.com/item.htm?id=1067224413274) |
+| HW-221 / TXS0108E 电平转换板 | [商品链接](https://item.taobao.com/item.htm?id=575223989976) |
+| 紫色 CH340E Type-C USB 转串口板 | [商品链接](https://item.taobao.com/item.htm?id=967672205574) |
+| 红黑香蕉插座 | [商品链接](https://item.taobao.com/item.htm?id=909723612339) |
 
 ## 项目目录
 
