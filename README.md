@@ -6,11 +6,26 @@
 
 [3D 打印模型与打印配置（MakerWorld）](https://makerworld.com.cn/zh/models/3324172-sx150c-type-c-ke-diao-zhi-liu-dian-yuan-wai-ke)
 
-## 下载和使用
+## 主要功能
 
-1. 下载 Windows 便携客户端和配套固件。`.bin` 用于客户端升级，`.hex` 用于 ESP32 下载口烧录。 [Windows 发布列表](https://github.com/chuckie0329/power_module/releases) · [独立固件稳定版](updates/firmware-stable.json)
-2. 按接线表连接模块，核对 SX150C 的地址、通讯波特率及 M0 保护设置。 [硬件接线表](docs/简化硬件接线表.md) · [固件联调说明](firmware/README.md)
-3. 用 Windows 客户端选择 USB 串口或 BLE 连接。可调电压和限流，设定 OVP、OCP、OPP，切换及备注 M0～M10，并记录电压、电流和功率。默认采样为 20 Hz，曲线数据可导出为 CSV。 [客户端使用与构建说明](pc_client/README.md)
+- **连接与输出控制**：Windows 客户端支持 CH340E USB 有线连接和蓝牙 BLE，可调节输出电压、限流，独立控制主输出和 K1、K2 两路继电器。
+- **记忆组与保护**：切换 M0～M10 时先关闭主输出。每组可设置名称和备注，并配置过压（OVP）、过流（OCP）、过功率（OPP）保护阈值。
+- **时序控制**：按步骤设置等待时间及 K1、K2、主输出的开关动作。下拉选择即载入，点击「运行」才执行。时序保存为 EXE 同级 `sequences/` 下的 JSON。
+- **实时曲线与 CSV**：电压、电流、功率分三轨显示，共用时间轴。支持滚轮缩放、拖动框选区间查看峰值和平均功率，以及导出采样数据。
+- **悬浮与托盘**：半透明置顶小窗显示实时读数和开关，主窗口收起后可从系统托盘恢复。
+- **诊断与升级**：通过 USB 导出固件诊断日志，无需拆外壳。Windows 客户端和 ESP32 固件可分别检查更新。
+
+> 「停止」时序只取消后续动作，不会自动关闭主输出或释放继电器。固件 v1.2.1 起，断开连接也不会自动关断。
+
+## 下载
+
+| 文件 | 用途 |
+| --- | --- |
+| [Windows 客户端 v1.1.0 · PowerModule-PC.exe](https://github.com/chuckie0329/power_module/releases/download/pc-v1.1.0/PowerModule-PC.exe) | Windows x64 便携版 |
+| [ESP32 固件 v1.2.6 · PowerModule-ESP32.bin](https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.bin) | 通过客户端升级 |
+| [ESP32 固件 v1.2.6 · PowerModule-ESP32.hex](https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.hex) | 通过 UART0 下载口烧录 |
+
+[全部发布](https://github.com/chuckie0329/power_module/releases) · [客户端使用说明](pc_client/README.md) · [固件与烧录说明](firmware/README.md) · [硬件接线表](docs/简化硬件接线表.md)
 
 ## 项目目录
 
