@@ -1,0 +1,101 @@
+name: Backfill ESP32 HEX
+on:
+  push:
+    branches: [maintenance/fw-hex-backfill]
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "1.2.2"
+            commit: 10f2d146317de25dc9ee7acf9687adc3ec417d68
+            ota_sha: 24590ba3c850828f4bdc454fc9af70fb59deeba88de1090b9e826ef8c6cfd2f7
+          - version: "1.2.3"
+            commit: b9c58112f32c1b2ef157a66341d0e7069e38b8c6
+            ota_sha: d9f77810ba27682fce4be6593d4c646d890abd400bef214a08318f21eb54340e
+          - version: "1.2.4"
+            commit: b48604b20b960ae24315292e6d6b2637aa19ab51
+            ota_sha: d3ceba1c523154e09b00638ab55a995e6d72fdda91b24fecf881d58b65e35f57
+          - version: "1.2.5"
+            commit: 0e74687bfe77549fc2d42942d3f386c2189179f0
+            ota_sha: 0a1c0e6fad5ea2560e5e274fdd8d3d0accb08532abcce316eb163823f7593598
+          - version: "1.2.6"
+            commit: a7f08c346ab295fd95ae5e830c0bab6435359261
+            ota_sha: 7352b43a36716c575a5d9770cdb749df87146de33ab703f4c968cf83f585e817
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.commit }}
+          path: firmware-tag
+          persist-credentials: false
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          version: '1.3.1'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install intelhex==2.3.0
+      - name: Verify the original tag and build its pinned ESP32 profile
+        env:
+          VERSION: ${{ matrix.version }}
+          EXPECTED_COMMIT: ${{ matrix.commit }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/fw-v$VERSION"
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$EXPECTED_COMMIT"
+          test "$(git -C firmware-tag rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          arduino-cli compile --profile power_module --build-path "$RUNNER_TEMP/esp32" firmware-tag/firmware/PowerModule
+      - name: Package and verify the exact published OTA bytes in sparse HEX
+        env:
+          VERSION: ${{ matrix.version }}
+          OTA_SHA: ${{ matrix.ota_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          curl -fsSL --retry 4 "https://github.com/$GITHUB_REPOSITORY/releases/download/fw-v$VERSION/PowerModule-ESP32.bin" -o "$RUNNER_TEMP/app.bin"
+          python -m tools.package_fw_hex "$RUNNER_TEMP/esp32" "$RUNNER_TEMP/app.bin" "$VERSION" dist/PowerModule-ESP32.hex --expected-sha "$OTA_SHA"
+          (cd dist && sha256sum PowerModule-ESP32.hex > SHA256SUMS-HEX.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ESP32-HEX-${{ matrix.version }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ESP32-HEX-*
+          path: dist
+      - name: Add new assets without overwriting existing assets; verify public downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for version in 1.2.2 1.2.3 1.2.4 1.2.5 1.2.6; do
+            tag="fw-v$version"
+            path="dist/ESP32-HEX-$version"
+            (cd "$path"; sha256sum --check SHA256SUMS-HEX.txt)
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > "$RUNNER_TEMP/release.json"
+            jq -e '.isDraft == false and any(.assets[]; .name == "PowerModule-ESP32.bin")' "$RUNNER_TEMP/release.json"
+            for asset in PowerModule-ESP32.hex SHA256SUMS-HEX.txt; do
+              if ! jq -e --arg n "$asset" 'any(.assets[]; .name == $n)' "$RUNNER_TEMP/release.json" > /dev/null; then
+                gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$path/$asset"
+              fi
+              curl -fsSL --retry 4 --retry-all-errors "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$asset" -o "$RUNNER_TEMP/$asset"
+              cmp "$path/$asset" "$RUNNER_TEMP/$asset"
+            done
+            echo "Verified public HEX: $tag"
+          done
