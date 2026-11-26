@@ -405,6 +405,29 @@ class Client:
             raise DeviceError("FIRMWARE_UPDATE")
         return await self.call(operation, args, revision)
 
+    async def apply_protection(self, group, revision, operations):
+        """Apply requested blocks in order, carrying the verified revision forward."""
+        link = self.link
+        verified = []
+        for operation, args in operations:
+            try:
+                if link is None or self.link is not link or not self.ready:
+                    raise DeviceError("LINK_ERROR")
+                reply = await self.change(operation, args, revision)
+                applied = reply.get("applied", {})
+                protection = reply.get("protection", {})
+                next_revision = reply.get("state_rev")
+                if (applied.get("group") != group or applied.get("enabled") is not False
+                        or type(next_revision) is not int
+                        or any(type(protection.get(key)) is not int or protection[key] != value
+                               for key, value in args.items())):
+                    raise DeviceError("READBACK_MISMATCH")
+            except Exception as error:
+                return {"group": group, "verified": verified, "error": str(error) or "LINK_ERROR"}
+            verified.append(operation)
+            revision = next_revision
+        return {"group": group, "verified": verified, "error": ""}
+
     async def read_diagnostics(self):
         if not self.ready or self.link is None or self.link.name != "usb":
             raise DeviceError("DIAG_USB")
