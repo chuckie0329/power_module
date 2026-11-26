@@ -504,16 +504,20 @@ class Window(QMainWindow):
         if self.info or "connect" in self.jobs or "scan" in self.jobs:
             return
         if self.kind == "ble":
+            self.target.setPlaceholderText("")
             self.announce("正在扫描 BLE 设备…")
             self.launch("scan", BleLink.scan())
             return
         old = self.target.currentData()
         with QSignalBlocker(self.target):
             self.target.clear()
+            self.target.setPlaceholderText("未找到 CH340 串口")
             for description, name in usb_ports():
                 self.target.addItem(description, name)
             if (index := self.target.findData(old)) >= 0:
                 self.target.setCurrentIndex(index)
+            elif self.target.count():
+                self.target.setCurrentIndex(0)
         self.render()
 
     def transport_changed(self):

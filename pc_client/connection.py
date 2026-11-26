@@ -21,9 +21,19 @@ from pc_client.protocol import (
 
 
 def usb_ports():
-    ports = sorted(list_ports.comports(), key=lambda port: (port.vid != 0x1A86, port.device))
+    def is_ch340(port):
+        if port.vid is not None and port.vid != 0x1A86:
+            return False
+        if port.vid == 0x1A86 and port.pid == 0x7523:
+            return True
+        if port.vid is not None and port.pid is not None:
+            return False
+        # Some drivers report a friendly name but omit the USB identifiers.
+        return bool(re.search(r"\bCH340[A-Z]?\b", port.description or "", re.IGNORECASE))
+
+    ports = sorted((port for port in list_ports.comports() if is_ch340(port)), key=lambda port: port.device)
     return [
-        (f"{port.device}  ·  {port.description.removesuffix(f' ({port.device})')}", port.device)
+        (f"{port.device}  ·  {(port.description or 'CH340').removesuffix(f' ({port.device})')}", port.device)
         for port in ports
     ]
 
