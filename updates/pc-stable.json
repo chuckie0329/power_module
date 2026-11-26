@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.9",
+    "version": "1.0.10",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.9/PowerModule-PC.exe",
-    "sha256": "6068a15e7a0719c2de0d8a9d7c46d53e2d155b14baae617fc69b2d31ff92aa10",
-    "size": 38698365,
-    "notes": "记忆组卡片合并输出设定和保护阈值，顶部直接切组并自动关主输出。左栏收窄，保护阈值改为单按钮应用及核对读回。保留原桌面快捷方式。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.10/PowerModule-PC.exe",
+    "sha256": "b5c2c4b937d8b0c680a99cf7374c6a3f25f757ddc7c0dc342723918cf340bb8c",
+    "size": 38699503,
+    "notes": "USB 诊断可解读 ESP32 v1.2.5 的蓝牙 RSSI、连接参数和发送失败计数。兼容旧固件。"
   }
 }
