@@ -9,6 +9,7 @@ from pc_client.app import Window
 from pc_client.connection import Client, DeviceError
 from pc_client.diagnostics import ACTION, InvalidDiagnosticReply, read_snapshot, serialize
 from pc_client.protocol import decode, encode
+from pc_client.version import PC_VERSION
 
 
 def info(oldest=1, until=4, boot_id=2026):
@@ -169,5 +170,5 @@ class DiagnosticUITest(unittest.TestCase):
             snapshot = {"events": [], "overwritten_before_read": 0, "overwritten_during_read": 0}
             Window.save_diagnostics(view, (snapshot, "1.2.4"))
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-            self.assertEqual((payload["firmware"], payload["client"]), ("1.2.4", "1.0.6"))
+            self.assertEqual((payload["firmware"], payload["client"]), ("1.2.4", PC_VERSION))
             self.assertNotIn("device_id", payload)
