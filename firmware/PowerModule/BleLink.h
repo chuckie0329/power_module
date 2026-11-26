@@ -2,6 +2,7 @@
 
 #include <NimBLEDevice.h>
 #include <atomic>
+#include <nimble/nimble_port.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "Protocol.h"
@@ -11,9 +12,9 @@ namespace pm {
 class BleLink final : private NimBLEServerCallbacks, private NimBLECharacteristicCallbacks {
 public:
     bool begin(const char* name, const Message& info);
-    void tick();
+    void tick(bool allowAdvertisingRecovery);
     const char* clearBonds(unsigned& cleared);
-    uint32_t generation() const { return generation_.load(); }
+    uint32_t generation() const;
     Receive receive(Message& message);
     void reply(Message message, uint32_t generation);
     bool wantsState() const;
@@ -42,8 +43,18 @@ private:
                      uint16_t value) override;
     void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& info) override;
     void onStatus(NimBLECharacteristic* characteristic, int code) override;
-    void disconnect();
-    void sendOne(uint32_t now);
+    enum class CloseReason : uint32_t {
+        SecurityRejected = 1, RxOverflow, SecurityTimeout, ReplyOverflow,
+        IndicationFailed, IndicationTimeout, NotSubscribed
+    };
+    void requestDisconnect(uint32_t generation, CloseReason reason);
+    void clearConnection();
+    static void runRecovery(ble_npl_event* event);
+    void recover();
+    static constexpr uint32_t kReasonBits = 3;
+    static constexpr uint32_t kReasonMask = (1u << kReasonBits) - 1;
+    static constexpr uint32_t kRecoveryPeriodMs = 500;
+    void sendOne(uint32_t now, uint32_t generation);
     size_t fragment(SendCursor& cursor, const Message& message, uint8_t* frame);
     bool advance(SendCursor& cursor, const Message& message);
 
@@ -53,6 +64,15 @@ private:
     NimBLECharacteristic* state_ = nullptr;
     QueueHandle_t packets_ = nullptr;
     std::atomic<uint32_t> generation_{0};
+    std::atomic<uint32_t> closeRequest_{0};  // Connection generation and CloseReason.
+    std::atomic<bool> allowAdvertisingRecovery_{false};
+    std::atomic<bool> advertisingBusy_{false};
+    std::atomic<bool> recoveryQueued_{false};
+    ble_npl_event recoveryEvent_{};
+    uint32_t nextRecovery_ = 0;  // Loop task only.
+    uint32_t loggedRequest_ = 0;  // NimBLE host task only.
+    int loggedResult_ = -1;
+    bool advertisingFailed_ = false;
     std::atomic<uint16_t> handle_{BLE_HS_CONN_HANDLE_NONE};
     std::atomic<uint16_t> mtu_{23};
     std::atomic<bool> secure_{false};

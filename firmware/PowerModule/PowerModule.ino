@@ -122,7 +122,7 @@ void pumpMaintenance() {
 
 bool serviceLinks() {
     if (!linksReady) return true;
-    ble.tick();
+    ble.tick(!controller.streamsPaused());
     const uint32_t generation = ble.generation();
     controller.bleChanged(generation, ble.minStreamMs());
     if (generation != bleGeneration) {
