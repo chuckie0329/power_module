@@ -1,3 +1,3 @@
 """Independent desktop-client release version."""
 
-PC_VERSION = "1.0.8"
+PC_VERSION = "1.0.9"
