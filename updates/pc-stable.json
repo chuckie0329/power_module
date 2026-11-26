@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.5",
+    "version": "1.0.6",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.5/PowerModule-PC.exe",
-    "sha256": "f1231f9c3e6f329ebcbe73fc01255b629512aba39d0a939045f582c6b9c8f1c4",
-    "size": 38680262,
-    "notes": "修复 Windows BLE 首次连接和升级窗口首开显示；保留 EXE 文件名与桌面快捷方式。固件不变。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.6/PowerModule-PC.exe",
+    "sha256": "f81515934c4b077202b4f5d53a7636255d3c305268644aeb69083f08e23983ac",
+    "size": 38687149,
+    "notes": "新增 USB 固件诊断日志导出，需 ESP32 固件 1.2.4。保留 PowerModule-PC.exe 文件名与桌面快捷方式。"
   }
 }

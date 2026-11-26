@@ -2,12 +2,12 @@
   "schema": 1,
   "kind": "firmware",
   "stable": {
-    "version": "1.2.3",
+    "version": "1.2.4",
     "target": "PowerModule-ESP32",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.3/PowerModule-ESP32.bin",
-    "sha256": "d9f77810ba27682fce4be6593d4c646d890abd400bef214a08318f21eb54340e",
-    "size": 661760,
-    "notes": "支持经 USB 清除设备端蓝牙配对，需 PC 1.0.2。升级前关闭主输出和两路继电器。",
+    "url": "https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.4/PowerModule-ESP32.bin",
+    "sha256": "d3ceba1c523154e09b00638ab55a995e6d72fdda91b24fecf881d58b65e35f57",
+    "size": 667712,
+    "notes": "修复 BLE 掉线后广播恢复；可通过 USB 导出最近 64 条诊断事件，需客户端 1.0.6。升级前关闭主输出和两路继电器。",
     "protocol": 1
   }
 }
