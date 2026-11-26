@@ -39,8 +39,17 @@ def main(encoder):
     assert len(seen) == 3 and snapshot["events"]
     assert not snapshot["overwritten_during_read"]
     assert any(row["event"] == "disconnected" for row in snapshot["events"])
-    parsed = json.loads(serialize(snapshot, "1.2.4", "1.0.6"))
-    assert parsed["events"] == snapshot["events"] and parsed["firmware"] == "1.2.4"
+    by_name = {row["event"]: row for row in snapshot["events"]}
+    rssi = by_name["ble_last_rssi"]
+    params = by_name["ble_conn_parameters"]
+    failures = by_name["ble_tx_failures"]
+    drop = by_name["disconnected"]
+    assert (rssi["rssi_dbm"], rssi["sample_age_ms"]) == (-66, 380)
+    assert (params["interval_ms"], params["peripheral_latency"], params["supervision_timeout_ms"]) == (30, 2, 6000)
+    assert (failures["notification_failures"], failures["indication_failures"]) == (2, 1)
+    assert drop["gap_reason"] == 520 and {row["uptime_ms"] for row in (rssi, params, failures, drop)} == {2400}
+    parsed = json.loads(serialize(snapshot, "1.2.5", "1.0.10"))
+    assert parsed["events"] == snapshot["events"] and parsed["firmware"] == "1.2.5"
     print(f"Firmware → USB CRC frames → client JSON: {len(snapshot['events'])} events")
 
 

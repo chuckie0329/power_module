@@ -1,4 +1,5 @@
 #include "DiagnosticProtocol.h"
+#include "BleQuality.h"
 #include <cassert>
 #include <climits>
 #include <iostream>
@@ -20,7 +21,16 @@ static void emitFixture() {
     ring.append(202, DiagEvent::Authentication, 3, 7);
     ring.append(2000, DiagEvent::DisconnectRequested, 6, 1);
     ring.append(2030, DiagEvent::Termination, 6, 0);
-    ring.append(2400, DiagEvent::GapDisconnect, 3, 531);
+    BleQuality quality;
+    quality.begin(1);
+    quality.sample(2020, -66);
+    quality.txFailed(1, false);
+    quality.txFailed(1, false);
+    quality.txFailed(1, true);
+    quality.summarize(2400, 24, 2, 600, [&](DiagEvent code, int32_t a, int32_t b) {
+        ring.append(2400, code, a, b);
+    });
+    ring.append(2400, DiagEvent::GapDisconnect, 3, 520);
     ring.append(2500, DiagEvent::AdvertisingRetry, 0, 0);
     ring.append(3000, DiagEvent::AdvertisingRetry, 1, 0);
     const auto range = ring.range();
@@ -43,6 +53,27 @@ int main(int argc, char** argv) {
         emitFixture();
         return 0;
     }
+    BleQuality quality;
+    quality.begin(2);
+    quality.sample(UINT32_MAX - 9, -80);
+    quality.sample(4, 127);
+    quality.txFailed(1, false);
+    quality.txFailed(2, true);
+    quality.finish();
+    quality.txFailed(2, true);
+    unsigned summaries = 0;
+    quality.summarize(10, 24, 3, 600, [&](DiagEvent code, int32_t a, int32_t b) {
+        ++summaries;
+        if (code == DiagEvent::BleLastRssi) assert(a == -80 && b == 20);
+        else if (code == DiagEvent::BleConnectionParameters) assert(a == 24 && b == 3 * 65536 + 600);
+        else { assert(code == DiagEvent::BleTxFailures && a == 0 && b == 1); }
+    });
+    assert(summaries == 3);
+    quality.begin(3);
+    quality.summarize(50, 12, 0, 200, [](DiagEvent code, int32_t a, int32_t b) {
+        if (code == DiagEvent::BleLastRssi) assert(a == 127 && b == -1);
+        if (code == DiagEvent::BleTxFailures) assert(a == 0 && b == 0);
+    });
     DiagnosticRing ring;
     DiagnosticRing::Page page;
     assert(ring.range().oldest == 1 && ring.range().next == 1);

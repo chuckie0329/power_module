@@ -26,7 +26,7 @@ for label, fixture in fixtures.items():
 
 # USB in 1.2.4 adds a capability without changing old client framing. In
 # particular, an oversized full response must still preserve the capability.
-if version == "1.2.4":
+if tuple(map(int, version.split("."))) >= (1, 2, 4):
     for fixture in fixtures.values():
         usb_caps = {
             **fixture["data"],

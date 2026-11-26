@@ -10,6 +10,7 @@ namespace pm {
 enum class DiagEvent : uint8_t {
     Boot = 1, AdvertisingInitial, Connect, Authentication, GapDisconnect,
     Termination, StaleHandle, AdvertisingRetry, SecurityStartFailed, DisconnectRequested,
+    BleLastRssi = 11, BleConnectionParameters, BleTxFailures,
 };
 
 struct DiagnosticRecord {

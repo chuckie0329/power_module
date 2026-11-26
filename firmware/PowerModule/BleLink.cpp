@@ -8,6 +8,7 @@
 namespace pm {
 namespace {
 constexpr char kBleLog[] = "pm-ble";
+constexpr uint32_t kRssiPeriodMs = 2000;
 }
 
 
@@ -88,6 +89,10 @@ void BleLink::onConnect(NimBLEServer* server, NimBLEConnInfo& info) {
     securityUntil_.store(millis() + kBleSecurityTimeoutMs);
     nextGeneration_ = (nextGeneration_ + 1) & (UINT32_MAX >> kReasonBits);
     if (!nextGeneration_) ++nextGeneration_;
+    portENTER_CRITICAL(&bleQualityLock_);
+    bleQuality_.begin(nextGeneration_);
+    portEXIT_CRITICAL(&bleQualityLock_);
+    nextRssi_ = millis();
     generation_.store(nextGeneration_);
     int rc = 0;
     if (!NimBLEDevice::startSecurity(handle, &rc)) {
@@ -96,7 +101,19 @@ void BleLink::onConnect(NimBLEServer* server, NimBLEConnInfo& info) {
 }
 
 void BleLink::onDisconnect(NimBLEServer*, NimBLEConnInfo& info, int reason) {
-    diagnostics_.append(millis(), DiagEvent::GapDisconnect, info.getConnHandle(), reason);
+    const uint32_t now = millis();
+    if (info.getConnHandle() == handle_.load()) {
+        BleQuality summary;
+        portENTER_CRITICAL(&bleQualityLock_);
+        summary = bleQuality_;
+        bleQuality_.finish();
+        portEXIT_CRITICAL(&bleQualityLock_);
+        summary.summarize(now, info.getConnInterval(), info.getConnLatency(), info.getConnTimeout(),
+                          [this, now](DiagEvent code, int32_t a, int32_t b) {
+                              diagnostics_.append(now, code, a, b);
+                          });
+    }
+    diagnostics_.append(now, DiagEvent::GapDisconnect, info.getConnHandle(), reason);
     ESP_LOGI(kBleLog, "GAP disconnect handle=%u reason=%d",
              unsigned(info.getConnHandle()), reason);
     if (info.getConnHandle() == handle_.load()) clearConnection();
@@ -237,6 +254,16 @@ void BleLink::recover() {
         }
     } link{*this, handle, request};
     recoverBleLink(link);
+    // Execute on the host task like the recovery checks, with the current
+    // handle; never read RSSI from a stale peer or during an OTA pause.
+    const uint32_t now = millis();
+    if (!request && handle != BLE_HS_CONN_HANDLE_NONE && handle_.load() == handle
+        && secure_.load() && allowAdvertisingRecovery_.load() && due(now, nextRssi_)
+        && ble_hs_synced() && ble_gap_conn_find(handle, nullptr) == 0) {
+        nextRssi_ = now + kRssiPeriodMs;
+        int8_t dbm;
+        if (ble_gap_conn_rssi(handle, &dbm) == 0) bleQuality_.sample(millis(), dbm);
+    }
 }
 
 void BleLink::tick(bool allowAdvertisingRecovery) {
@@ -311,6 +338,12 @@ bool BleLink::advance(SendCursor& cursor, const Message& message) {
     return size_t(++cursor.index) * cursor.stride >= message.size();
 }
 
+void BleLink::noteTxFailure(uint32_t generation, bool indication) {
+    portENTER_CRITICAL(&bleQualityLock_);
+    bleQuality_.txFailed(generation, indication);
+    portEXIT_CRITICAL(&bleQualityLock_);
+}
+
 void BleLink::sendOne(uint32_t now, uint32_t generation) {
     const auto handle = handle_.load();
     if (handle == BLE_HS_CONN_HANDLE_NONE) return;
@@ -321,6 +354,7 @@ void BleLink::sendOne(uint32_t now, uint32_t generation) {
         const int status = indicationStatus_.exchange(0);
         if (status == 0 && !due(now, indicateUntil_)) return;
         if (status != 1) {
+            noteTxFailure(generation, true);
             requestDisconnect(generation, status ? CloseReason::IndicationFailed : CloseReason::IndicationTimeout);
             return;
         }
@@ -340,6 +374,7 @@ void BleLink::sendOne(uint32_t now, uint32_t generation) {
         const size_t size = fragment(replyCursor_, replies_.front(), frame);
         indicationStatus_.store(0);
         if (!rsp_->indicate(frame, size, handle)) {
+            noteTxFailure(generation, true);
             requestDisconnect(generation, CloseReason::IndicationFailed);
             return;
         }
@@ -348,7 +383,9 @@ void BleLink::sendOne(uint32_t now, uint32_t generation) {
     } else if (!stateMessage_.empty() && due(now, nextNotify_)) {
         const size_t size = fragment(stateCursor_, stateMessage_, frame);
         nextNotify_ = now + (mtu_.load() >= kFastBleMtu ? 10 : 20);
-        if (state_->notify(frame, size, handle) && advance(stateCursor_, stateMessage_)) {
+        if (!state_->notify(frame, size, handle)) {
+            noteTxFailure(generation, false);
+        } else if (advance(stateCursor_, stateMessage_)) {
             stateMessage_.clear();
         }
     }

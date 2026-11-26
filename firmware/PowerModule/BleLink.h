@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "DiagnosticLog.h"
+#include "BleQuality.h"
 #include "Protocol.h"
 
 namespace pm {
@@ -57,6 +58,7 @@ private:
     void clearConnection();
     static void runRecovery(ble_npl_event* event);
     void recover();
+    void noteTxFailure(uint32_t generation, bool indication);
     static constexpr uint32_t kReasonBits = 3;
     static constexpr uint32_t kReasonMask = (1u << kReasonBits) - 1;
     static constexpr uint32_t kRecoveryPeriodMs = 500;
@@ -65,6 +67,9 @@ private:
     bool advance(SendCursor& cursor, const Message& message);
 
     DiagnosticLog& diagnostics_;
+    BleQuality bleQuality_;
+    portMUX_TYPE bleQualityLock_ = portMUX_INITIALIZER_UNLOCKED;
+    uint32_t nextRssi_ = 0;  // NimBLE host task only.
     bool ready_ = false;
     NimBLEServer* server_ = nullptr;
     NimBLECharacteristic* rsp_ = nullptr;

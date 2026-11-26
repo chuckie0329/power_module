@@ -21,6 +21,9 @@ EVENTS = {
     8: ("advertising_retry", "started", None),
     9: ("security_start_failed", "handle", "result"),
     10: ("disconnect_requested", "cause", "generation"),
+    11: ("ble_last_rssi", None, None),
+    12: ("ble_conn_parameters", None, None),
+    13: ("ble_tx_failures", "notification_failures", "indication_failures"),
 }
 TERMINATION_CAUSES = {
     1: "security_rejected",
@@ -86,6 +89,13 @@ async def read_snapshot(call):
                 row[field_a] = a
             if field_b:
                 row[field_b] = b
+            if code == 11:
+                row["rssi_dbm"] = a if -127 <= a <= 20 and b >= 0 else None
+                row["sample_age_ms"] = b if row["rssi_dbm"] is not None else None
+            elif code == 12 and 0 < a <= 65535 and b >= 0:
+                row["interval_ms"] = a * 1.25
+                row["peripheral_latency"] = b >> 16
+                row["supervision_timeout_ms"] = (b & 0xffff) * 10
             if row.get("cause") in TERMINATION_CAUSES:
                 row["cause_name"] = TERMINATION_CAUSES[row["cause"]]
             rows.append(row)

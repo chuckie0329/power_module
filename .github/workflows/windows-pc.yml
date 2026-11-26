@@ -2,7 +2,7 @@ name: Windows PC client
 
 on:
   push:
-    branches: [main, ci/pc-v1.0.9, ship/pc-v1.0.9]
+    branches: [main, ci/pc-v1.0.10, ship/pc-v1.0.10]
   workflow_dispatch:
 
 permissions:
@@ -34,13 +34,13 @@ jobs:
         run: ./tools/smoke_pc_windows.ps1
       - name: Exercise self-update handoff on Windows
         run: ./tools/smoke_pc_upgrade_windows.ps1
-      - name: Validate the official v1.0.8 predecessor identity
+      - name: Validate the official v1.0.9 predecessor identity
         shell: pwsh
         run: |
           $old = Join-Path $env:RUNNER_TEMP 'PowerModule-PC.exe'
-          curl.exe -fsSL --retry 3 'https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.8/PowerModule-PC.exe' -o $old
-          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $old).Hash.ToLowerInvariant() -ne '366c06617223f67cb0546d8cb6e57bcbb49426696a6afbdb94db81d6dd74edf3') { throw 'Invalid predecessor checksum' }
-          python -c "from pathlib import Path; import sys; from pc_client.pc_upgrade import _predecessor; assert _predecessor(Path(sys.argv[1]), '1.0.8', '1.0.9')" $old
+          curl.exe -fsSL --retry 3 'https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.9/PowerModule-PC.exe' -o $old
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $old).Hash.ToLowerInvariant() -ne '6068a15e7a0719c2de0d8a9d7c46d53e2d155b14baae617fc69b2d31ff92aa10') { throw 'Invalid predecessor checksum' }
+          python -c "from pathlib import Path; import sys; from pc_client.pc_upgrade import _predecessor; assert _predecessor(Path(sys.argv[1]), '1.0.9', '1.0.10')" $old
           if ($LASTEXITCODE -ne 0) { throw 'Invalid old client identity' }
       - name: Exercise the tagged v1.0.3 migration on Windows
         run: ./tools/smoke_legacy_upgrade_windows.ps1
@@ -52,7 +52,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.9'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ship/pc-v1.0.10'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -72,19 +72,19 @@ jobs:
           set -euo pipefail
           version="$(python3 -c 'from pc_client.version import PC_VERSION; print(PC_VERSION)')"
           tag="pc-v$version"
-          test "$tag" = pc-v1.0.9
+          test "$tag" = pc-v1.0.10
           test "ship/$tag" = "$GITHUB_REF_NAME"
           test "$GITHUB_SHA" = "$(git ls-remote origin refs/heads/main | cut -f1)"
           (cd dist; sha256sum PowerModule-PC.exe > SHA256SUMS.txt)
           gh release create "$tag" dist/PowerModule-PC.exe dist/SHA256SUMS.txt \
             --target "$GITHUB_SHA" --latest=false --title "PowerModule PC v$version" \
-            --notes "记忆组合并输出设定和保护阈值，顶部直接切组，仍由固件确认关闭主输出后再调出目标组。缩窄左侧面板给曲线腾空间。应用保护阈值合为一个按钮，只提交改动并核对设备读回，部分失败会明确提示。保留 PowerModule-PC.exe 文件名和原桌面快捷方式；ESP32 固件无需更新。"
+            --notes "USB 诊断 JSON 可解读 ESP32 v1.2.5 新增的蓝牙 RSSI、连接参数和发送失败计数。仍兼容旧固件，不改变蓝牙连接行为；保留 PowerModule-PC.exe 文件名和原桌面快捷方式。"
 
       - name: Verify public executable and checksum
         shell: bash
         run: |
           set -euo pipefail
-          base="https://github.com/$GITHUB_REPOSITORY/releases/download/pc-v1.0.9"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/pc-v1.0.10"
           mkdir -p verification
           curl -fsSL --retry 5 --retry-all-errors "$base/PowerModule-PC.exe" -o verification/PowerModule-PC.exe
           curl -fsSL --retry 5 --retry-all-errors "$base/SHA256SUMS.txt" -o verification/SHA256SUMS.txt
