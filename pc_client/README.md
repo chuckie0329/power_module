@@ -45,8 +45,8 @@
 
 PC 自动切换需要 Windows 正式 EXE 及可写的客户端目录；源码模式仍支持手动选择固件。
 
-[firmware-bin]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.bin
-[firmware-hex]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.hex
+[firmware-bin]: https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.bin
+[firmware-hex]: https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.hex
 
 2026-11-21 在实机上用同一份 660944 字节的 v1.2.0 镜像验证升级。COM4 从 app0 切换到 app1，含重启和确认用时 60.9 秒。BLE 从 app1 切换到 app0，用时 141.7 秒。中途取消、校验失败和 BLE 断开均保留了原启动分区。另一次启动到 app1 后省略客户端确认，设备约两分钟后自动回到 app0，主输出读回关闭。
 

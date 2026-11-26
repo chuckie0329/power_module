@@ -17,6 +17,8 @@ SX150C 通信电平与 CH340E 的 VBUS 隔离按实物核对后接线。Modbus �
 
 ## 构建和烧录
 
+正式发布中，`PowerModule-ESP32.bin` 用于客户端在线升级，`PowerModule-ESP32.hex` 用于 UART0 烧录。旧发布补发的 HEX 单独用 `SHA256SUMS-HEX.txt` 校验，原 BIN 和校验文件不变。
+
 Arduino CLI 的 `power_module` 配置固定 ESP32 Arduino Core 3.3.12、NimBLE-Arduino 2.3.8、ArduinoJson 7.4.2。使用 Arduino IDE 时，打开固件入口，安装相同版本并选择 **ESP32 Dev Module**、**4 MB Flash**、**DIO**、**40 MHz** 和默认分区。 [构建配置](PowerModule/sketch.yaml) · [ESP32 Arduino Core](https://github.com/espressif/arduino-esp32/releases/tag/3.3.12) · [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino/releases/tag/2.3.8) · [ArduinoJson](https://github.com/bblanchon/ArduinoJson/releases/tag/v7.4.2)
 
 通过 COM3 读取本机 Flash ID，实物容量为 4 MB（32 Mbit）。默认分区下单个应用分区为 1.25 MiB。
@@ -52,8 +54,8 @@ Copy-Item .work/esp32-build/PowerModule.ino.bin firmware/build/PowerModule-ESP32
 
 设备首次使用升级功能需要通过下载口安装 v1.2.0 或更新固件。之后连接 CH340E 有线串口或 BLE，在 PC 客户端的「固件升级」中选择应用镜像。 [客户端升级 BIN][firmware-bin] · [下载口烧录 HEX][firmware-hex]
 
-[firmware-bin]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.bin
-[firmware-hex]: https://github.com/chuckie0329/power_module/releases/download/v1.2.1/PowerModule-ESP32.hex
+[firmware-bin]: https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.bin
+[firmware-hex]: https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.hex
 
 升级要求主输出和两路继电器已读回关闭。固件检查应用镜像类型，将数据顺序写入空闲应用分区，并检查完整 SHA-256 和 ESP32 应用镜像。传输中断或取消可从头重试。设备在 45 秒没有收到固件数据后清理未完成的传输。校验通过后切换启动分区，客户端会重新连接并确认新版本。新版本启动后约两分钟未获得确认时，设备会尝试回到上一个有效版本。升级只写应用分区和启动记录，地址、波特率及蓝牙配对等设置保存在 NVS。[ESP-IDF 应用升级与回退](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/ota.html)
 
