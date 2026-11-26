@@ -105,7 +105,8 @@ raise SystemExit(app.main())
             Write-Output "Canonical shortcut verified for $previousName"
         } finally {
             Get-Process -Name 'PowerModule-PC*' -ErrorAction SilentlyContinue | Where-Object {
-                $_.Path -and $_.Path.StartsWith($location + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+                $processPath = $_.Path
+                $processPath -and $processPath.StartsWith($location + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
             } | Stop-Process -Force -ErrorAction SilentlyContinue
         }
     }
