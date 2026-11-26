@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.0.7",
+    "version": "1.0.8",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.7/PowerModule-PC.exe",
-    "sha256": "f94eac5a1178f3aada422ab1dbf7f0566d6a352fd5ee46a4ee2da4ce5b5dd523",
-    "size": 38692045,
-    "notes": "电压、电流和功率同图显示，支持框选冻结及区间统计；USB 有线仅列出 CH340。保留原桌面快捷方式。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.0.8/PowerModule-PC.exe",
+    "sha256": "366c06617223f67cb0546d8cb6e57bcbb49426696a6afbdb94db81d6dd74edf3",
+    "size": 38693111,
+    "notes": "电压、电流和功耗分轨显示，左侧新增中文标识。滚轮缩放时间轴，支持框选统计和恢复实时。保留原桌面快捷方式。"
   }
 }
