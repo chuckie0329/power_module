@@ -23,6 +23,14 @@ class Average:
     samples: int
 
 
+@dataclass(frozen=True, slots=True)
+class RangeSummary:
+    volts: float | None
+    amps: float | None
+    peak_watts: float | None
+    average: Average
+
+
 class PowerHistory:
     retention = 2 * 60 * 60
     max_gap = 6.0
@@ -144,6 +152,21 @@ class PowerHistory:
             coverage,
             sum(start <= p.time <= end for p in points),
         )
+
+
+    @staticmethod
+    def summarize(points, start, end):
+        volts = amps = peak_watts = None
+        for point in points:
+            if not start <= point.time <= end:
+                continue
+            if point.volts is not None and (volts is None or point.volts > volts):
+                volts = point.volts
+            if point.amps is not None and (amps is None or point.amps > amps):
+                amps = point.amps
+            if peak_watts is None or point.watts > peak_watts:
+                peak_watts = point.watts
+        return RangeSummary(volts, amps, peak_watts, PowerHistory.average(points, start, end))
 
 
 def save_csv(filename, points, wall_time_offset):
