@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "pc",
   "stable": {
-    "version": "1.1.0",
+    "version": "1.2.0",
     "target": "windows-x64",
-    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.1.0/PowerModule-PC.exe",
-    "sha256": "ea1609961803bded19cbaca3081ffd5924f53891b8ba2aa992d2434127f1d42e",
-    "size": 38719991,
-    "notes": "新增时序控制，下拉选择即载入，可在主界面运行或停止。时序保存在 EXE 同级 sequences 文件夹。无需更新固件。"
+    "url": "https://github.com/chuckie0329/power_module/releases/download/pc-v1.2.0/PowerModule-PC.exe",
+    "sha256": "f36075b132b0bddf79a0bb26466dade05bd28766cfcccedf2ad07707a9f1f2ad",
+    "size": 38730959,
+    "notes": "新增继电器命名与接线绑定。新时序按名称执行，换线只改绑定；旧时序继续按原通道执行。无需更新固件。"
   }
 }

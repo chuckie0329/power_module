@@ -12,7 +12,7 @@ PowerModule 把这些物理动作变成可保存、可重跑的时序。它也�
 
 ## 主要功能
 
-- **把台架动作编成时序。** 给每一步设置等待时间，独立控制 K1、K2 和主输出。比如把两路继电器接到目标板适合用干接点控制的 BOOT 和 RESET 按键上，就能把「按住 BOOT → 短按 RESET → 松开 BOOT」保存成一套流程，用于重复进入下载模式。也可以编排断电、等待、重新上电，让每轮调试从相同条件开始。时序以 JSON 保存在 EXE 同级的 `sequences/` 目录，下拉选中即载入，点击「运行」才执行。
+- **把台架动作编成时序。** 给每一步设置等待时间，按名称控制两路继电器，也能独立控制主输出。换接线只改 K1、K2 的名称绑定，时序不用重写。比如把两路继电器接到目标板适合用干接点控制的 BOOT 和 RESET 按键上，就能把「按住 BOOT → 短按 RESET → 松开 BOOT」保存成一套流程，用于重复进入下载模式。也可以编排断电、等待、重新上电，让每轮调试从相同条件开始。时序以 JSON 保存在 EXE 同级的 `sequences/` 目录，下拉选中即载入，点击「运行」才执行。
 - **让每轮试验用相同的供电条件。** 通过 USB（CH340E）或蓝牙 BLE 连接，调节电压、限流，分别控制主输出和两路继电器。M0～M10 可保存不同的供电与保护设定，并在客户端添加名称和备注；切组前先关主输出。
 - **用曲线读出设备的反应。** 电压、电流、功率分轨显示，共用时间轴。可以滚轮放大上电瞬间，框选区间查看峰值和平均功率，也能导出 CSV 比较多轮测试。
 - **调试时不挡代码和终端。** 半透明置顶小窗保留实时读数和常用开关，主窗口可收进系统托盘。遇到连接问题，可通过 USB 导出固件诊断日志；Windows 客户端和 ESP32 固件可分别检查更新。
@@ -29,7 +29,7 @@ PowerModule 把这些物理动作变成可保存、可重跑的时序。它也�
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows 客户端 v1.1.0 · PowerModule-PC.exe](https://github.com/chuckie0329/power_module/releases/download/pc-v1.1.0/PowerModule-PC.exe) | Windows x64 便携版 |
+| [Windows 客户端 v1.2.0 · PowerModule-PC.exe](https://github.com/chuckie0329/power_module/releases/download/pc-v1.2.0/PowerModule-PC.exe) | Windows x64 便携版 |
 | [ESP32 固件 v1.2.6 · PowerModule-ESP32.bin](https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.bin) | 通过客户端升级 |
 | [ESP32 固件 v1.2.6 · PowerModule-ESP32.hex](https://github.com/chuckie0329/power_module/releases/download/fw-v1.2.6/PowerModule-ESP32.hex) | 通过 UART0 下载口烧录 |
 
