@@ -413,6 +413,8 @@ class Client:
 
     async def run_relay_sequence(self, device, steps, cancelled, profile=None, expected_enabled=None):
         steps = validate_steps(steps)
+        if any(step.named for step in steps):
+            raise ValueError("继电器名称尚未解析为物理通道。")
         link, epoch = self.link, self.relay_epoch
         done, pending = 0, None
         opens_output = any(step.output is True for step in steps)
@@ -464,7 +466,8 @@ class Client:
                     check()
                 if step.output is False:
                     await set_output(False)
-                for channel, state in enumerate((step.k1, step.k2), 1):
+                for channel in step.order:
+                    state = step.k1 if channel == 1 else step.k2
                     if state is None:
                         continue
                     check()

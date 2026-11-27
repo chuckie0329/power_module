@@ -114,8 +114,8 @@ class FloatingPanel(QWidget):
         for channel, (source, state) in relays.items():
             button = self.relays[channel]
             button.setText(f"K{channel} " + ("开" if state is True else "关" if state is False else "—"))
-            button.setToolTip(source.text())
-            button.setAccessibleDescription(source.text())
+            button.setToolTip(source.toolTip() or source.text())
+            button.setAccessibleDescription(button.toolTip())
             button.setEnabled(source.isEnabled())
             self._energized(button, state is True)
 

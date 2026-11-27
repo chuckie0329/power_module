@@ -13,13 +13,17 @@ from unittest.mock import AsyncMock, Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtCore import QSettings
 
 from pc_client.app import RELAY_SEQUENCE, Window
 from pc_client.connection import Client, DeviceError
-from pc_client.relay_dialog import RelaySequenceDialog
-from pc_client.relay_sequence import RelayStep, SequenceStore, load_sequence, save_sequence, sequence_directory
+from pc_client.relay_dialog import RelayNamesDialog, RelaySequenceDialog
+from pc_client.relay_sequence import RelayNames, RelayStep, SequenceStore, load_sequence, resolve_steps, save_sequence, sequence_directory
 
 STEPS = (RelayStep(0, True, False), RelayStep(0, None, True))
+NAMED = (RelayStep(0, None, None, named=(("启动", True), ("RESET", False))),
+         RelayStep(10, None, None, True))
+
 
 
 class SequenceFiles(unittest.TestCase):
@@ -79,6 +83,35 @@ class SequenceFiles(unittest.TestCase):
                 load_sequence(path)
 
 
+    def test_named_round_trip_and_full_preflight(self):
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "fixture.json"
+            save_sequence(path, NAMED)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["version"], 3)
+            self.assertEqual(load_sequence(path), NAMED)
+            config = RelayNames(("启动", "RESET"), ("启动", None))
+            with self.assertRaisesRegex(ValueError, "RESET"):
+                resolve_steps(NAMED, config)
+            self.assertEqual(resolve_steps(STEPS, config), STEPS)
+            for bad in ([["启动", 1]], [["启动", True], ["启动", False]], [["", True]], [["启动"]]):
+                data["steps"][0]["relays"] = bad
+                path.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    load_sequence(path)
+
+    def test_mapping_persists_and_rejects_duplicate_bindings_or_names(self):
+        config = RelayNames(("启动", "RESET"), ("RESET", "启动"))
+        self.assertEqual(RelayNames.decode(config.encode()), config)
+        for names, ports in [
+            (("RESET", "ｒｅｓｅｔ"), (None, None)),
+            (("RESET",), ("RESET", "RESET")),
+            (("RESET",), ("启动", None)),
+        ]:
+            with self.assertRaises(ValueError):
+                RelayNames(names, ports)
+
+
 class SequenceWorker(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         client = self.client = Client(SimpleNamespace(relay_progress=Mock()))
@@ -115,6 +148,29 @@ class SequenceWorker(unittest.IsolatedAsyncioTestCase):
             ("set_relay", {"channel": 2, "enabled": False}, None),
             ("set_relay", {"channel": 2, "enabled": True}, None),
         ])
+
+    async def test_rebinding_keeps_action_order_and_output_rules(self):
+        self.live_output()
+        for wiring, order in [(("启动", "RESET"), (1, 2)), (("RESET", "启动"), (2, 1))]:
+            self.client.change.reset_mock()
+            steps = resolve_steps((
+                RelayStep(0, None, None, False, NAMED[0].named),
+                NAMED[1],
+            ), RelayNames(("启动", "RESET"), wiring))
+            result = await self.client.run_relay_sequence(
+                "sim", steps, self.cancel.is_set, (4, 5000, 1200), True,
+            )
+            calls = self.client.change.await_args_list
+            self.assertEqual(result["error"], "")
+            self.assertEqual([call.args[0] for call in calls],
+                             ["output_off", "set_relay", "set_relay", "set_output"])
+            self.assertEqual([call.args[1]["channel"] for call in calls[1:3]], list(order))
+            self.assertEqual([call.args[1]["enabled"] for call in calls[1:3]], [True, False])
+
+    async def test_unresolved_named_steps_never_reach_device(self):
+        with self.assertRaises(ValueError):
+            await self.run_steps(NAMED)
+        self.client.change.assert_not_awaited()
 
     async def test_stop_during_long_wait(self):
         asyncio.get_running_loop().call_later(0.02, self.cancel.set)
@@ -219,6 +275,7 @@ class SequenceUi(unittest.TestCase):
         self.app = QApplication.instance() or QApplication([])
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, self.temp.name)
         self.window = Window()
         self.window.sequence_store = SequenceStore(Path(self.temp.name) / "sequences")
         self.window.refresh_sequence_selector()
@@ -243,16 +300,44 @@ class SequenceUi(unittest.TestCase):
         self.window.refresh_sequence_selector()
         self.window.sequence_selector.setCurrentIndex(self.window.sequence_selector.findData(name))
 
+    def test_names_editor_saves_bindings_without_operating_device(self):
+        w = self.window
+        self.connected()
+
+        def edit(dialog):
+            for name in ("启动", "RESET"):
+                dialog.new_name.setText(name)
+                dialog.add_name()
+            dialog.ports[0].setCurrentIndex(1)
+            dialog.ports[1].setCurrentIndex(1)
+            dialog.save()
+            self.assertIn("不能绑定同一个", dialog.status.text())
+            dialog.ports[1].setCurrentIndex(2)
+            dialog.save()
+            return dialog.result()
+
+        with patch.object(RelayNamesDialog, "exec", new=edit), patch.object(w.worker, "submit") as submit:
+            w.relay_name_config.click()
+            submit.assert_not_called()
+        self.assertEqual(w.relay_names.bindings, ("启动", "RESET"))
+        self.assertIn("启动", w.relay[1].text())
+        settings = QSettings(w.group_settings.fileName(), QSettings.Format.IniFormat)
+        self.assertEqual(RelayNames.decode(settings.value("relays/names_and_bindings")), w.relay_names)
+
     def test_editor_preserves_step_table_saves_to_fixed_directory(self):
         w = self.window
+        w.save_relay_names(RelayNames(("启动", "RESET"), ("启动", "RESET")))
 
         def edit(dialog):
             self.assertIs(dialog.store, w.sequence_store)
+            self.assertEqual(dialog.table.columnCount(), 6)
             dialog.table.cellWidget(0, 1).setCurrentIndex(1)
+            dialog.table.cellWidget(0, 2).setCurrentIndex(1)
             dialog.add_step()
             dialog.table.cellWidget(1, 0).setValue(1200)
-            dialog.table.cellWidget(1, 2).setCurrentIndex(2)
             dialog.table.cellWidget(1, 3).setCurrentIndex(2)
+            dialog.table.cellWidget(1, 4).setCurrentIndex(2)
+            dialog.table.cellWidget(1, 5).setCurrentIndex(2)
             dialog.move_step(-1)
             dialog.name.setText("中文测试")
             dialog.save.click()
@@ -261,12 +346,48 @@ class SequenceUi(unittest.TestCase):
         self.assertFalse(w.sequence_run.isEnabled())
         with patch.object(RelaySequenceDialog, "exec", new=edit):
             w.sequence_new.click()
-        expected = (RelayStep(1200, None, False, False), RelayStep(0, True, None))
+        expected = (RelayStep(1200, None, None, False, (("RESET", False),)),
+                    RelayStep(0, None, None, named=(("启动", True),)))
         self.assertEqual(w.sequence_store.names(), ["中文测试"])
         self.assertEqual(w.sequence_store.load("中文测试"), expected)
         self.assertEqual(w.loaded_sequence, ("中文测试", expected))
         self.assertFalse(w.sequence_run.isEnabled())
         self.assertEqual(w.jobs, set())
+
+    def test_missing_name_blocks_entire_run_and_swap_updates_resolution(self):
+        w = self.window
+        self.connected()
+        w.sequence_store.save("named", NAMED)
+        self.select("named")
+        self.assertFalse(w.sequence_run.isEnabled())
+        self.assertIn("请先绑定", w.sequence_summary.text())
+        snapshot = (w.sequence_store.directory / "named.json").read_bytes()
+        with patch.object(w.worker, "submit", side_effect=lambda _name, coro: coro.close()) as submit:
+            w.start_relay_sequence(NAMED)
+            submit.assert_not_called()
+            w.save_relay_names(RelayNames(("启动", "RESET"), ("RESET", "启动")))
+            submit.assert_not_called()
+            self.assertTrue(w.sequence_run.isEnabled())
+            self.assertIn("K2：启动", w.sequence_summary.text())
+            w.sequence_run.click()
+            submit.assert_called_once()
+            self.assertFalse(w.relay_name_config.isEnabled())
+        self.assertEqual((w.sequence_store.directory / "named.json").read_bytes(), snapshot)
+
+    def test_legacy_editor_does_not_silently_convert_channels(self):
+        w = self.window
+        w.save_relay_names(RelayNames(("启动", "RESET"), ("RESET", "启动")))
+        w.sequence_store.save("legacy", STEPS)
+        self.select("legacy")
+
+        def edit(dialog):
+            self.assertEqual(dialog.table.columnCount(), 4)
+            dialog.save.click()
+            return dialog.result()
+
+        with patch.object(RelaySequenceDialog, "exec", new=edit):
+            w.sequence_edit.click()
+        self.assertEqual(w.sequence_store.load("legacy"), STEPS)
 
     def test_select_auto_loads_and_never_runs_or_leaves_stale_sequence(self):
         self.connected()

@@ -19,8 +19,8 @@ from pc_client.firmware_update import FirmwareImage, MIN_FIRMWARE_VERSION
 from pc_client.floating import FloatingPanel
 from pc_client.history import PowerHistory, normalize_measurements
 from pc_client.pc_upgrade import pending_handoff, run_upgrade_worker, smoke_handoff, smoke_startup
-from pc_client.relay_dialog import RelaySequenceDialog
-from pc_client.relay_sequence import SequenceStore, output_profile, sequence_directory
+from pc_client.relay_dialog import RelayNamesDialog, RelaySequenceDialog
+from pc_client.relay_sequence import RelayNames, SequenceStore, output_profile, resolve_steps, sequence_directory
 from pc_client.theme import STYLES, icon
 from pc_client.update_dialog import UpdateDialog
 from pc_client.version import PC_VERSION
@@ -30,6 +30,7 @@ GROUP_NOTE_ROLE = Qt.ItemDataRole.UserRole + 1
 GROUP_SWITCH = "切换数据组"
 APPLY_PROTECTION = "应用保护阈值"
 RELAY_SEQUENCE = "时序控制"
+RELAY_NAMES_KEY = "relays/names_and_bindings"
 CONTROL_RAIL_WIDTH = 224
 MAX_MEMORY_GROUP = 10  # SX150C firmware supports eleven slots, M0 through M10.
 MAX_OUTPUT_MW = 75000
@@ -231,6 +232,10 @@ class Window(QMainWindow):
         self.tray = None
         self.hidden_chart_dialog = None
         self.update_dialog = None
+        try:
+            self.relay_names = RelayNames.decode(self.group_settings.value(RELAY_NAMES_KEY, ""))
+        except (TypeError, ValueError, RecursionError):
+            self.relay_names = RelayNames()
         self.sequence_store = SequenceStore(sequence_directory())
         self.loaded_sequence = None
         self.relay_cancel = Event()
@@ -525,6 +530,8 @@ class Window(QMainWindow):
         for item in self.relay.values():
             relay_row.addWidget(item, 1)
         relay_layout.addLayout(relay_row)
+        self.relay_name_config = button("设置名称…", self.edit_relay_names)
+        relay_layout.addWidget(self.relay_name_config)
         layout.addWidget(relays)
 
         sequence, seq_layout = card("时序控制")
@@ -1195,6 +1202,22 @@ class Window(QMainWindow):
         if ok:
             self.change("OCP 单位", "match_ocp", {"ocp_mA": round(reading * 1000)}, revision=True)
 
+    @Slot()
+    def edit_relay_names(self):
+        if RELAY_SEQUENCE in self.jobs or self.exit_requested or self.pc_handoff:
+            return
+        RelayNamesDialog(self.relay_names, self.save_relay_names, self).exec()
+
+    def save_relay_names(self, config):
+        if RELAY_SEQUENCE in self.jobs or self.exit_requested or self.pc_handoff:
+            raise ValueError("时序运行中或客户端正在退出，不能修改绑定。")
+        self.group_settings.setValue(RELAY_NAMES_KEY, config.encode())
+        self.group_settings.sync()
+        if self.group_settings.status() != QSettings.Status.NoError:
+            raise OSError("未能保存继电器名称设置。")
+        self.relay_names = config
+        self.render()
+
     def refresh_sequence_selector(self, selected=None):
         selected = selected or self.sequence_selector.currentData()
         names = []
@@ -1240,7 +1263,7 @@ class Window(QMainWindow):
         except (OSError, ValueError) as error:
             self.sequence_status.setText(f"无法编辑：{error}")
             return
-        dialog = RelaySequenceDialog(self.sequence_store, name, steps, self)
+        dialog = RelaySequenceDialog(self.sequence_store, name, steps, self, relay_names=self.relay_names.names)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.refresh_sequence_selector(dialog.saved_name)
         dialog.deleteLater()
@@ -1257,6 +1280,7 @@ class Window(QMainWindow):
         editable = not (running or self.exit_requested or self.pc_handoff)
         selected = self.sequence_selector.currentData() is not None
         self.sequence_selector.setEnabled(editable and self.sequence_selector.count() > 0)
+        self.relay_name_config.setEnabled(editable)
         self.sequence_new.setEnabled(editable)
         self.sequence_edit.setEnabled(editable and selected)
         problem = self.relay_sequence_blocker()
@@ -1264,6 +1288,19 @@ class Window(QMainWindow):
         if self.loaded_sequence:
             steps = self.loaded_sequence[1]
             summary = f"{len(steps)} 步"
+            if any(step.named for step in steps):
+                try:
+                    resolve_steps(steps, self.relay_names)
+                except ValueError as error:
+                    problem = str(error)
+                    summary += f"\n{problem}"
+                else:
+                    names_used = {name for step in steps for name, _ in step.named}
+                    wiring = " · ".join(f"K{channel}：{name}" for channel, name
+                                        in enumerate(self.relay_names.bindings, 1) if name in names_used)
+                    summary += f"\n{wiring}"
+            elif any(step.k1 is not None or step.k2 is not None for step in steps):
+                summary += " · 按 K1/K2"
             if any(step.output is True for step in steps):
                 profile = output_profile(self.state) if self.info and self.state.get("measured", {}).get("fresh") else None
                 if not problem and (profile is None or type(self.state.get("applied", {}).get("enabled")) is not bool):
@@ -1298,6 +1335,11 @@ class Window(QMainWindow):
 
     @Slot(object)
     def start_relay_sequence(self, steps):
+        try:
+            steps = resolve_steps(steps, self.relay_names)
+        except ValueError as error:
+            self.sequence_status.setText(str(error))
+            return
         problem = self.relay_sequence_blocker()
         if problem:
             self.sequence_status.setText(problem)
@@ -1454,7 +1496,16 @@ class Window(QMainWindow):
         for channel, widget in self.relay.items():
             engaged = applied.get(f"relay{channel}")
             description = "吸合" if engaged is True else "释放" if engaged is False else "状态未知"
-            widget.setText(f"K{channel}  ·  {description}")
+            name = self.relay_names.bindings[channel - 1]
+            if name is None:
+                widget.setText(f"K{channel}  ·  {description}")
+                widget.setToolTip("")
+            else:
+                width = CONTROL_RAIL_WIDTH // 2 - 34
+                short = widget.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, width)
+                widget.setText(f"{short} · {description}")
+                widget.setToolTip(f"K{channel}：{name} · {description}")
+            widget.setAccessibleName(widget.toolTip() or widget.text())
             dynamic(widget, "active", engaged is True)
             widget.setEnabled(normal_control and isinstance(engaged, bool))
 
@@ -1640,11 +1691,12 @@ def main():
                 app.processEvents()
                 compact = panel.isVisible() and panel.width() < 260 and panel.height() < 90
                 panel.hide()
-                editor = RelaySequenceDialog(window.sequence_store, parent=window)
+                editor = RelaySequenceDialog(window.sequence_store, parent=window, relay_names=window.relay_names.names)
                 sequence_ok = (window.sequence_store.directory == Path(sys.executable).resolve().parent / "sequences"
                                and window.sequence_selector.isVisible() and not hasattr(window, "sequence_load")
                                and window.sequence_run.text() == "运行" and not window.sequence_run.isEnabled()
-                               and editor.table.columnCount() == 4 and editor.table.cellWidget(0, 3).count() == 3)
+                               and editor.table.columnCount() == 6 and editor.table.cellWidget(0, 5).count() == 3
+                               and window.relay_name_config.isVisible())
                 editor.close()
                 marker = Path(sys.argv[2])
                 if (window.isVisible() and not window.windowIcon().isNull() and PC_VERSION in window.windowTitle()
